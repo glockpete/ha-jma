@@ -1,0 +1,116 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "気象庁 予報区",
+        "data": {
+          "office": "府県予報区"
+        }
+      },
+      "area": {
+        "title": "警報の対象地域",
+        "data": {
+          "area": "警報の対象とする市区町村"
+        }
+      },
+      "confirm": {
+        "title": "確認",
+        "description": "{area}の警報を表示します。\n\n観測：{primary}。気圧と欠測値の補完には {secondary} を使います。"
+      }
+    },
+    "abort": {
+      "already_configured": "この地域はすでに設定されています。",
+      "cannot_connect": "気象庁のサーバーに接続できませんでした。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "気象庁の設定",
+        "data": {
+          "station_primary": "主なアメダス観測所のID",
+          "station_secondary": "補助のアメダス観測所のID（種別A）",
+          "debug_simulate": "テスト用アクション jma.simulate を有効にする"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "warning_level": {
+        "name": "警報レベル"
+      },
+      "rain_next_hour": {
+        "name": "1時間先までの降水"
+      },
+      "radar_frames": {
+        "name": "レーダーのコマ"
+      },
+      "overview": {
+        "name": "概況"
+      },
+      "last_earthquake": {
+        "name": "直近の地震"
+      },
+      "warning_outlook": {
+        "name": "警報の見通し"
+      },
+      "typhoon": {
+        "name": "台風"
+      },
+      "wbgt": {
+        "name": "暑さ指数（WBGT）"
+      },
+      "kikikuru": {
+        "name": "キキクル（危険度分布）"
+      },
+      "rain_outlook": {
+        "name": "降水の見通し"
+      },
+      "japan": {
+        "name": "全国の天気"
+      }
+    },
+    "binary_sensor": {
+      "feed_problem": {
+        "name": "データ取得の問題"
+      }
+    },
+    "event": {
+      "alerts": {
+        "name": "アラート",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "warning_issued": "警報・注意報の発表",
+              "warning_raised": "警報・注意報の引き上げ",
+              "warning_lowered": "警報・注意報の引き下げ",
+              "warning_cleared": "警報・注意報の解除",
+              "warning_in_force": "すでに発表中の警報・注意報",
+              "rain_arriving": "雨雲の接近",
+              "earthquake": "地震",
+              "eew": "緊急地震速報",
+              "eew_cancelled": "緊急地震速報の取り消し"
+            }
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "simulate": {
+      "name": "アラートの模擬発生（テスト専用）",
+      "description": "気象庁または P2P 地震情報が発信したかのように、アラートのイベントを発生させます。デバッグ設定が有効な間だけ登録されます。",
+      "fields": {
+        "event_type": {
+          "name": "イベントの種類",
+          "description": "アラートのイベントの種類のいずれか。"
+        },
+        "data": {
+          "name": "データ",
+          "description": "オートメーションが読み取るイベントのデータ。"
+        }
+      }
+    }
+  }
+}

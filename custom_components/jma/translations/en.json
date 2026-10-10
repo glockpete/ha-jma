@@ -1,0 +1,116 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "JMA forecast office",
+        "data": {
+          "office": "Forecast office (府県予報区)"
+        }
+      },
+      "area": {
+        "title": "Warnings area",
+        "data": {
+          "area": "Ward / municipality for warnings (市区町村)"
+        }
+      },
+      "confirm": {
+        "title": "Confirm",
+        "description": "Warnings for {area}.\n\nObservations: {primary}, with {secondary} for pressure and any missing values."
+      }
+    },
+    "abort": {
+      "already_configured": "This area is already set up.",
+      "cannot_connect": "Could not reach the Japan Meteorological Agency's server."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "JMA options",
+        "data": {
+          "station_primary": "Primary AMeDAS station id",
+          "station_secondary": "Secondary AMeDAS station id (type A)",
+          "debug_simulate": "Enable the jma.simulate test action"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "warning_level": {
+        "name": "Warning level"
+      },
+      "rain_next_hour": {
+        "name": "Rain next hour"
+      },
+      "radar_frames": {
+        "name": "Radar frames"
+      },
+      "overview": {
+        "name": "Overview"
+      },
+      "last_earthquake": {
+        "name": "Last earthquake"
+      },
+      "warning_outlook": {
+        "name": "Warning outlook"
+      },
+      "typhoon": {
+        "name": "Typhoon"
+      },
+      "wbgt": {
+        "name": "WBGT"
+      },
+      "kikikuru": {
+        "name": "Kikikuru"
+      },
+      "rain_outlook": {
+        "name": "Rain outlook"
+      },
+      "japan": {
+        "name": "Japan"
+      }
+    },
+    "binary_sensor": {
+      "feed_problem": {
+        "name": "Feed problem"
+      }
+    },
+    "event": {
+      "alerts": {
+        "name": "Alerts",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "warning_issued": "Warning issued",
+              "warning_raised": "Warning raised",
+              "warning_lowered": "Warning lowered",
+              "warning_cleared": "Warning cleared",
+              "warning_in_force": "Warning already in force",
+              "rain_arriving": "Rain arriving",
+              "earthquake": "Earthquake",
+              "eew": "Earthquake early warning",
+              "eew_cancelled": "Earthquake early warning cancelled"
+            }
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "simulate": {
+      "name": "Simulate alert (test only)",
+      "description": "Fires an alert event as if JMA or P2P had produced it. Only registered while the debug option is on.",
+      "fields": {
+        "event_type": {
+          "name": "Event type",
+          "description": "One of the alert event types."
+        },
+        "data": {
+          "name": "Data",
+          "description": "Event data the automations read."
+        }
+      }
+    }
+  }
+}

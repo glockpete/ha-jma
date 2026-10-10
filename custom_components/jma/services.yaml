@@ -1,0 +1,20 @@
+simulate:
+  fields:
+    event_type:
+      required: true
+      selector:
+        select:
+          options:
+            - warning_issued
+            - warning_raised
+            - warning_lowered
+            - warning_cleared
+            - warning_in_force
+            - rain_arriving
+            - earthquake
+            - eew
+            - eew_cancelled
+    data:
+      required: false
+      selector:
+        object:

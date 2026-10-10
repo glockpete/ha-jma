@@ -1,0 +1,171 @@
+"""Config flow: forecast office -> warnings area (class20) -> confirm the auto-picked stations.
+
+JMA's class20 boundary GeoJSON is chunked by bounding box (class20relm.json), so the ward is
+picked from a list rather than located from HA's home coordinates. AMeDAS stations are
+chosen by distance: primary = nearest measuring temperature, secondary = nearest type A.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any
+
+import voluptuous as vol
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
+
+from .api import JmaApi
+from .const import (
+    CONF_AREA,
+    CONF_AREA_NAME_JA,
+    CONF_DEBUG_SIMULATE,
+    CONF_OFFICE,
+    CONF_STATION_PRIMARY,
+    CONF_STATION_SECONDARY,
+    DOMAIN,
+    URL_AMEDAS_TABLE,
+    URL_AREA,
+)
+from .errors import JmaError
+
+
+def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    p = math.radians
+    a = (math.sin(p(lat2 - lat1) / 2) ** 2
+         + math.cos(p(lat1)) * math.cos(p(lat2)) * math.sin(p(lon2 - lon1) / 2) ** 2)
+    return 2 * 6371 * math.asin(math.sqrt(a))
+
+
+def pick_stations(table: dict[str, Any], lat: float, lon: float) -> tuple[str, str, float, float]:
+    """(primary id, secondary id, primary km, secondary km)."""
+    rows = []
+    for sid, st in table.items():
+        slat = st["lat"][0] + st["lat"][1] / 60
+        slon = st["lon"][0] + st["lon"][1] / 60
+        rows.append((_km(lat, lon, slat, slon), sid, st))
+    rows.sort(key=lambda r: r[0])
+    primary = next(r for r in rows if str(r[2].get("elems", "0"))[:1] == "1")
+    secondary = next(r for r in rows if r[2].get("type") == "A")
+    return primary[1], secondary[1], primary[0], secondary[0]
+
+
+def area_chain(area_json: dict[str, Any], class20: str) -> tuple[str, str]:
+    """(class10, office) for a class20 code."""
+    c15 = area_json["class20s"][class20]["parent"]
+    c10 = area_json["class15s"][c15]["parent"]
+    return c10, area_json["class10s"][c10]["parent"]
+
+
+def device_title(area_json: dict[str, Any], class20: str) -> str:
+    en = area_json["class20s"][class20].get("enName") or class20
+    for suffix in (" City", " Ward", " Town", " Village"):
+        en = en.removesuffix(suffix)
+    return f"JMA {en}"
+
+
+class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
+    VERSION = 1
+
+    def __init__(self) -> None:
+        self._area_json: dict[str, Any] = {}
+        self._amedas: dict[str, Any] = {}
+        self._office: str | None = None
+        self._area: str | None = None
+        self._stations: tuple[str, str, float, float] | None = None
+
+    async def _load(self) -> None:
+        api = JmaApi(async_get_clientsession(self.hass))
+        self._area_json = await api.get_json(URL_AREA)
+        self._amedas = await api.get_json(URL_AMEDAS_TABLE)
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if not self._area_json:
+            try:
+                await self._load()
+            except JmaError:
+                return self.async_abort(reason="cannot_connect")
+        if user_input is not None:
+            self._office = user_input[CONF_OFFICE]
+            return await self.async_step_area()
+        offices = self._area_json["offices"]
+        options = [SelectOptionDict(value=code, label=f"{o['name']} ({code})")
+                   for code, o in sorted(offices.items())]
+        return self.async_show_form(step_id="user", data_schema=vol.Schema({
+            vol.Required(CONF_OFFICE): SelectSelector(SelectSelectorConfig(
+                options=options, mode=SelectSelectorMode.DROPDOWN)),
+        }))
+
+    async def async_step_area(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            self._area = user_input[CONF_AREA]
+            await self.async_set_unique_id(self._area)
+            self._abort_if_unique_id_configured()
+            return await self.async_step_confirm()
+        options = []
+        for code, c20 in sorted(self._area_json["class20s"].items()):
+            try:
+                if area_chain(self._area_json, code)[1] == self._office:
+                    options.append(SelectOptionDict(value=code, label=f"{c20['name']} ({code})"))
+            except KeyError:
+                continue
+        return self.async_show_form(step_id="area", data_schema=vol.Schema({
+            vol.Required(CONF_AREA): SelectSelector(SelectSelectorConfig(
+                options=options, mode=SelectSelectorMode.DROPDOWN)),
+        }))
+
+    async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        assert self._area is not None
+        if self._stations is None:
+            self._stations = pick_stations(
+                self._amedas, self.hass.config.latitude, self.hass.config.longitude)
+        primary, secondary, pkm, skm = self._stations
+        area = self._area_json["class20s"][self._area]
+        if user_input is not None:
+            class10, office = area_chain(self._area_json, self._area)
+            return self.async_create_entry(
+                title=device_title(self._area_json, self._area),
+                data={
+                    CONF_OFFICE: office,
+                    CONF_AREA: self._area,
+                    "area_name": area["name"],
+                    CONF_AREA_NAME_JA: area["name"],  # the quake part matches addresses with it
+                    "class10": class10,
+                    CONF_STATION_PRIMARY: primary,
+                    CONF_STATION_SECONDARY: secondary,
+                },
+            )
+        return self.async_show_form(
+            step_id="confirm",
+            description_placeholders={
+                "area": f"{area['name']} ({self._area})",
+                "primary": f"{self._amedas[primary]['kjName']} {primary} ({pkm:.1f} km)",
+                "secondary": f"{self._amedas[secondary]['kjName']} {secondary} ({skm:.1f} km)",
+            },
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+        return JmaOptionsFlow()
+
+
+class JmaOptionsFlow(OptionsFlow):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+        data = {**self.config_entry.data, **self.config_entry.options}
+        return self.async_show_form(step_id="init", data_schema=vol.Schema({
+            # A mistyped id would 404 silently and move every reading to the other station, so the format is checked.
+            vol.Required(CONF_STATION_PRIMARY, default=data[CONF_STATION_PRIMARY]): vol.All(
+                str, vol.Match(r"^\d{5}$")),
+            vol.Required(CONF_STATION_SECONDARY, default=data[CONF_STATION_SECONDARY]): vol.All(
+                str, vol.Match(r"^\d{5}$")),
+            vol.Required(CONF_DEBUG_SIMULATE, default=data.get(CONF_DEBUG_SIMULATE, False)): bool,
+        }))

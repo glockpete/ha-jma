@@ -1,0 +1,18 @@
+{
+  "domain": "jma",
+  "name": "JMA weather (気象庁)",
+  "codeowners": [
+    "@glockpete"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/glockpete/ha-jma",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/glockpete/ha-jma/issues",
+  "loggers": [
+    "custom_components.jma"
+  ],
+  "requirements": [],
+  "version": "0.1.0"
+}
