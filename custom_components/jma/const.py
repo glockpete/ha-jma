@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "jma"
-VERSION: Final = "0.6.0"
+VERSION: Final = "0.6.1"
 # Names the product and its version only; some services reject the default Python user agent.
 USER_AGENT: Final = f"ha-jma/{VERSION}"
 # Credit wording as each service's terms ask for it. JMA: 「出典：気象庁ホームページ　（当該ページのURL）」 and, for
@@ -266,6 +266,20 @@ PREFECTURES: Final[dict[str, str]] = {
 # The Japanese name of the area (the municipality chosen at set-up) is stored under this key; the quake
 # part matches point addresses with it.
 CONF_AREA_NAME_JA: Final = "area_name_ja"
+# The one area tier there is: the 23 special wards of Tokyo. The agency's class15 areas 130011 (２３区西部) and
+# 130012 (２３区東部) hold exactly these class20 areas (tests/fixtures/area.json; a test compares them name for
+# name and code for code). An entry in one of them is scoped to this area: earthquake events and early warnings
+# need a ward, not just any point of Tokyo prefecture (Tama and the islands are Tokyo prefecture too).
+TOKYO_23_WARDS: Final[dict[str, str]] = {
+    "1310100": "千代田区", "1310200": "中央区", "1310300": "港区", "1310400": "新宿区",
+    "1310500": "文京区", "1310600": "台東区", "1310700": "墨田区", "1310800": "江東区",
+    "1310900": "品川区", "1311000": "目黒区", "1311100": "大田区", "1311200": "世田谷区",
+    "1311300": "渋谷区", "1311400": "中野区", "1311500": "杉並区", "1311600": "豊島区",
+    "1311700": "北区", "1311800": "荒川区", "1311900": "板橋区", "1312000": "練馬区",
+    "1312100": "足立区", "1312200": "葛飾区", "1312300": "江戸川区",
+}
+# How P2P names it: the area-level 551 address and the 556 area name (full-width ２３; compared after NFKC).
+AREA_TOKYO_23: Final = "東京都２３区"
 EEW_BACKFILL_MAX_AGE_S: Final = 120
 # A warning issued further ahead of the host clock than this is dropped (with one WARNING per event id):
 # the clock is wrong. Within it a slow clock still alerts. Mirrors FUTURE_TOLERANCE of the tsunami tracker.

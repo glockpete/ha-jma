@@ -340,7 +340,8 @@ def test_the_client_routes_eew_by_prefecture() -> None:
 
 # ---------- the value names: prefecture, local, overall ----------
 
-SCALE_KEYS = {"pref_max_scale", "local_scale", "max_scale", "pref_shindo", "local_shindo", "max_shindo"}
+SCALE_KEYS = {"pref_max_scale", "area_max_scale", "local_scale", "max_scale",
+              "pref_shindo", "area_shindo", "local_shindo", "max_shindo"}
 
 
 def _scale_keys(mapping) -> set:
@@ -350,8 +351,10 @@ def _scale_keys(mapping) -> set:
 def test_event_data_carries_prefecture_and_local_values() -> None:
     q = parse_551(_551([_pt("東京都", "東京千代田区大手町", 30)]), CHIYODA)
     data = quake_event_data(q)
-    assert {"pref", "local_name", "pref_max_scale", "local_scale", "pref_shindo", "local_shindo", "max_shindo"} <= set(data)
+    assert {"pref", "area", "local_name", "pref_max_scale", "area_max_scale", "local_scale",
+            "pref_shindo", "area_shindo", "local_shindo", "max_shindo"} <= set(data)
     assert data["pref_shindo"] == "3" and data["local_shindo"] == "3"
+    assert data["area"] is None and data["area_max_scale"] is None and data["area_shindo"] is None  # CHIYODA: no area
     assert _scale_keys(data) == SCALE_KEYS
 
 
@@ -363,6 +366,7 @@ async def test_sensor_attributes_and_event_entity(tokyo: HomeAssistant, aioclien
     await setup(hass, entry)
     sensor = hass.states.get("sensor.jma_chiyoda_last_earthquake")
     assert sensor.attributes["pref"] == "東京都" and sensor.attributes["local_name"] == "千代田区"  # before any quake
+    assert sensor.attributes["area"] == "東京都２３区"  # Chiyoda is one of the 23 wards: its entry has the area
     assert _scale_keys(sensor.attributes) <= SCALE_KEYS
     msg = _551([_pt("東京都", "東京千代田区大手町", 30), _pt("東京都", "東京八王子市大横町", 45)],
                when="2026/09/26 13:10:00")
@@ -372,10 +376,12 @@ async def test_sensor_attributes_and_event_entity(tokyo: HomeAssistant, aioclien
     assert attrs["pref"] == "東京都" and attrs["local_name"] == "千代田区"
     assert attrs["pref_max_scale"] == 45 and attrs["pref_shindo"] == "5-"
     assert attrs["local_scale"] == 30 and attrs["local_shindo"] == "3"
+    assert attrs["area"] == "東京都２３区" and attrs["area_max_scale"] == 30 and attrs["area_shindo"] == "3"  # not Hachioji's 45
     assert _scale_keys(attrs) <= SCALE_KEYS
     ev = hass.states.get("event.jma_chiyoda_alerts")
     assert ev.attributes["event_type"] == "earthquake"
     assert ev.attributes["pref_max_scale"] == 45 and ev.attributes["local_scale"] == 30
+    assert ev.attributes["area_max_scale"] == 30 and ev.attributes["area_shindo"] == "3"
 
 
 async def test_renaming_the_entry_reloads_it(tokyo: HomeAssistant, aioclient_mock, entry) -> None:
@@ -402,20 +408,24 @@ async def test_a_changed_option_reloads_the_entry(tokyo: HomeAssistant, aioclien
     assert entry.runtime_data is not runtime
 
 
-async def test_an_entry_without_the_stored_name_has_unknown_local_values(tokyo: HomeAssistant, aioclient_mock) -> None:
+async def test_an_entry_without_any_stored_name_has_unknown_local_values(tokyo: HomeAssistant, aioclient_mock) -> None:
+    """Neither `area_name_ja` nor a Japanese `area_name`: the local values are unknown. The prefecture values work, and
+    so does the area (a ward entry does not need its name for it); see tests/test_quake_area.py for the legacy key."""
     hass = tokyo
-    data = {k: v for k, v in ENTRY_DATA.items() if k != CONF_AREA_NAME_JA}
+    data = {k: v for k, v in ENTRY_DATA.items() if k not in (CONF_AREA_NAME_JA, "area_name")}
     entry = MockConfigEntry(domain=DOMAIN, title=TITLE, unique_id=AREA, data=data)
     mock_jma(aioclient_mock)
     await setup(hass, entry)
     assert entry.state is ConfigEntryState.LOADED
     quake = entry.runtime_data.quake
-    assert quake.place == QuakePlace("東京都", None)  # the local values are unknown, the prefecture ones work
+    assert quake.place == QuakePlace.for_entry("東京都", None, AREA)  # the prefecture and the area work, no local name
+    assert quake.place.local_name is None and quake.place.area == "東京都２３区"
     quake.handle(_551([_pt("東京都", "東京千代田区大手町", 30)], when="2026/09/26 13:10:00"),
                  datetime(2026, 9, 26, 13, 12, tzinfo=JST))
     await hass.async_block_till_done()
     attrs = hass.states.get("sensor.jma_chiyoda_last_earthquake").attributes
     assert attrs["pref_max_scale"] == 30 and attrs["local_scale"] is None and attrs["local_name"] is None
+    assert attrs["area_max_scale"] == 30
 
 
 async def test_a_third_entry_opens_no_earthquake_connection(

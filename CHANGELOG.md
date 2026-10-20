@@ -3,6 +3,27 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
+## 0.6.1 - earthquake area for the 23 wards of Tokyo
+
+### Added
+
+- **An area tier between the prefecture and the municipality, for the 23 special wards of Tokyo.** An entry in
+  one of the 23 wards is scoped to the area `東京都２３区`. New values: `area`, `area_max_scale` and `area_shindo`
+  (in the `earthquake` event data and in the attributes of `sensor.jma_<place>_last_earthquake`; the sensor shows
+  `area` before any quake too), and `area` in the data of the `eew` and `eew_cancelled` events. Entries anywhere
+  else, including the Tama cities and the islands of Tokyo, have no area (`area` is empty) and are unchanged.
+
+### Changed
+
+- For an entry in one of the 23 wards, **`earthquake` events and early warnings (`eew`) no longer fire for the rest
+  of the prefecture**: a quake or a warning that names only the Tama cities or the islands raises nothing. An
+  `earthquake` event needs a point of the 23 wards (a ward address or the area-level row `東京都２３区`), and a
+  rise of the prefecture's maximum alone is no longer a `scale` change for such an entry. 0.6.0 used the whole
+  prefecture for every entry.
+- Entries made before 0.6 stored the Japanese municipality name only under `area_name`; the quake part now finds
+  it there when `area_name_ja` is missing (a numeric code under `area_name` is never taken as a name), so their
+  `local_*` values are known.
+
 ## 0.6.0 - first public release
 
 First release published on GitHub and in HACS. It builds on a private 0.5.x line that ran in a single home; this

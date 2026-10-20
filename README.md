@@ -53,7 +53,8 @@ account and no API key. It is a community project; it is not made, endorsed or s
 - **Typhoons**: every active storm with its track, wind, pressure and distance, and a *typhoon approach* alert when
   one is forecast to come near your home.
 - **Earthquakes**: the strongest shindo in your prefecture and in your municipality, plus early warnings
-  (緊急地震速報) as events.
+  (緊急地震速報) as events. For the 23 special wards of Tokyo the events follow the 23 wards, not the whole
+  prefecture.
 - **Tsunami** information as a sensor and as events.
 - **Heat-stroke alerts** (熱中症警戒アラート and 熱中症特別警戒アラート) from the Ministry of the Environment, and
   the forecast heat index (WBGT) where it is available.
@@ -150,10 +151,28 @@ designated city the name is also tried without its first `市`, because that is 
 `神戸市中央区` is matched as `神戸市中央区` and as `神戸中央区`). Addresses are compared as plain text; see
 [Known limits](#known-limits) for what that cannot do.
 
+**The area.** An entry in one of the 23 special wards of Tokyo also has an area, `東京都２３区`, between the
+prefecture and the municipality. A point is in the area when it is the agency's area-level row for the 23 wards
+(address `東京都２３区`) or when its address starts with the name of one of the 23 wards, whichever ward it is
+(`東京千代田区丸の内`; a leading `東京都` or `東京` is ignored). The rest of Tokyo prefecture (the Tama cities and the
+islands) is not in the area, and neither is a point whose address names no ward, such as `東京国際空港`. An entry
+anywhere else, including a Tokyo municipality outside the 23 wards such as `八王子市`, has no area: `area` is empty
+and everything follows the prefecture.
+
+An **`earthquake` event** goes out for a quake as soon as a report of it holds at least one point in the scope of
+the entry: the area for an entry that has one, the prefecture for every other entry. It goes out again when the
+scope's maximum rises, when the local scale rises or when the epicentre becomes known; `change` says which
+(`new`, `scale` or `detail`). A report that raises only the prefecture's maximum fires nothing for an entry that has
+an area (a quake in Tama or on the islands alone fires nothing for a ward). The newest quake is still shown by
+`sensor.jma_<place>_last_earthquake` whatever its scope. The same scope applies to the early warning (`eew`): for a
+ward entry only the warning's area `東京都２３区` counts.
+
 | Name | Meaning |
 |---|---|
 | `pref`, `local_name` | the prefecture and the municipality name the values are for |
+| `area` | `東京都２３区` for an entry in one of the 23 special wards of Tokyo, empty for every other entry |
 | `pref_max_scale`, `pref_shindo` | highest scale reported by a point in the prefecture, as the P2P code (10 to 70) and as the shindo label (`1`, `2`, `3`, `4`, `5-`, `5- or more`, `5+`, `6-`, `6+`, `7`) |
+| `area_max_scale`, `area_shindo` | the same for the points of the area; unknown when none reported, and always unknown for an entry without an area |
 | `local_scale`, `local_shindo` | the same for the local points; unknown when none reported |
 | `max_scale`, `max_shindo` | highest scale anywhere |
 | `hypocenter`, `magnitude`, `depth`, `time`, `issue_type`, `domestic_tsunami` | as reported |
@@ -167,9 +186,9 @@ designated city the name is also tried without its first `市`, because that is 
 | `warning_issued`, `warning_raised`, `warning_lowered`, `warning_cleared` | a warning for the municipality appears, rises, falls or ends | `phenomenon`, `old_level`, `new_level`, `name_ja`, `name_en`, `headline`, `area`, `report_time` |
 | `warning_in_force` | on the first poll after a start, a level 4 or 5 warning that is already in force | as above |
 | `rain_arriving` | the nowcast expects rain at the home location | `minutes`, `band`, `mmh_upper`, `max_mmh` |
-| `earthquake` | a point of the prefecture reported (not for quakes older than 10 minutes when history is replayed after a reconnect) | the [earthquake values](#earthquake-values) |
-| `eew` | an early warning (緊急地震速報) names an area of the prefecture, then again only if the forecast scale rises | `areas`, `predicted_scale`, `predicted_shindo`, `scale_from`, `scale_to`, `arrival_time`, `hypocenter`, `magnitude`, `update` |
-| `eew_cancelled` | the early warning that was announced is cancelled | |
+| `earthquake` | a point of the entry's scope reported: the area `東京都２３区` for the 23 special wards of Tokyo, the prefecture everywhere else ([details](#earthquake-values); not for quakes older than 10 minutes when history is replayed after a reconnect) | the [earthquake values](#earthquake-values), and `change` (`new`, `scale`, `detail`) |
+| `eew` | an early warning (緊急地震速報) names an area of the prefecture (for the 23 special wards of Tokyo: the area `東京都２３区`), then again only if the forecast scale rises | `areas` (the matched areas of the warning), `area` (the entry's area, empty outside the 23 wards), `predicted_scale`, `predicted_shindo`, `scale_from`, `scale_to`, `arrival_time`, `hypocenter`, `magnitude`, `update` |
+| `eew_cancelled` | the early warning that was announced is cancelled | `event_id`, `serial`, `pref`, `area`, `origin_time`, `hypocenter`, `magnitude` |
 | `tsunami` | the picture for your coast area changes, or a warning or major warning is in force anywhere in Japan | `id`, `issued`, `home_grade`, `home_grade_ja`, `home_area`, `home_height`, `home_height_m`, `home_arrival`, `home_condition`, `home_immediate`, `max_grade`, `areas_major`, `areas_warning`, `count_major`, `count_warning`, `count_watch`, `previous_home_grade`, `previous_max_grade`, `backfill` |
 | `tsunami_cancelled` | the tsunami information that was announced is cancelled or has expired | `id`, `issued`, `home_area`, `previous_home_grade`, `previous_max_grade`, `cancelled`, `expired`, `backfill` |
 | `typhoon_approach` | a storm's approach stage to your home rises. **notice**: the forecast track passes within 300 km of your home inside 72 hours, or your home enters the storm-warning zone (暴風警戒域) inside 72 hours. **urgent**: your home enters the storm-warning zone inside 24 hours, or is already inside | `storm_id`, `number`, `number_short`, `name_en`, `name_ja`, `category`, `stage`, `previous_stage`, `closest_km`, `closest_time`, `closest_hours`, `zone_enters_time`, `zone_enters_hours`, `distance_km`, `pressure_hpa`, `max_wind_ms`, `issue` |
@@ -199,7 +218,7 @@ automation:
           title: "{{ trigger.to_state.attributes.name_ja }}  (level {{ trigger.to_state.attributes.new_level }})"
           message: "{{ trigger.to_state.attributes.headline }}"
 
-  # An early earthquake warning names your prefecture.
+  # An early earthquake warning names your prefecture (for the 23 wards of Tokyo: the 23 wards).
   - alias: "JMA early earthquake warning"
     triggers:
       - trigger: state
@@ -307,6 +326,9 @@ Where a service states no rate limit, none is stated here; the intervals above a
 - **The heat index (WBGT) is created only for offices whose file name is known to the integration (Tokyo,
   `130000`).** For every other office the WBGT sensor is not created. The heat-stroke alert sensor works for every
   office.
+- **Only the 23 special wards of Tokyo have an area table.** Earthquake events and early warnings follow the whole
+  prefecture everywhere else, including the Tama cities and the islands of Tokyo; the finer areas of the other
+  prefectures are not mapped.
 - Weather, forecasts, warnings, rain and typhoons are offered for every municipality (class20 area) of the
   agency's list. The earthquake values for the **prefecture** work everywhere; the `local_*` values depend on the
   name match described under [Earthquake values](#earthquake-values), which has the limits below.
@@ -394,5 +416,7 @@ Acknowledgement: some of the rain-tile palette colours were taken from the publi
   接近通知、都道府県と市区町村の震度、緊急地震速報、津波情報、熱中症警戒アラート。
 - **制限**: 津波予報区は東京都（東京湾内湾・伊豆諸島・小笠原諸島）、暑さ指数（WBGT）は東京でのみ使えます。ほかの地域では津波センサーは `none` の
   ままですが、全国の津波警報・大津波警報はイベントと `max_grade` 属性に出ます。
+- **東京23区**: 東京23区の市区町村では、地震イベントと緊急地震速報は23区（東京都２３区）の観測点・予報区だけが対象です。
+  ほかの地域（東京都の多摩・島しょを含む）は都道府県全体が対象です。
 - **地震・津波情報**は P2P地震情報 から受け取ります。**これだけを頼りに避難や安全の判断をしないでください。**
 - **出典**: 各サービスの利用規約に従って表示してください。Open-Meteo の無料 API は非営利目的に限られます。

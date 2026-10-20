@@ -40,6 +40,7 @@ HISTORY_PARAMS = [("codes", "551"), ("codes", "556"), ("limit", "20")]
 def quake_event_data(quake: Quake) -> dict[str, Any]:
     data = quake.as_dict()
     data["pref_shindo"] = SHINDO.get(quake.pref_max_scale or 0)
+    data["area_shindo"] = SHINDO.get(quake.area_max_scale or 0)
     data["local_shindo"] = SHINDO.get(quake.local_scale or 0)
     data["max_shindo"] = SHINDO.get(quake.max_scale or 0)
     return data
@@ -70,7 +71,7 @@ class QuakeClient:
         # what the sensors were last told about: the bulletin id (an attribute) and the picture (the state)
         self._tsunami_shown: tuple[str | None, TsunamiPicture | None] = (None, None)
         self._quakes = QuakeTracker(place)
-        self._eew = EewTracker(place.pref)
+        self._eew = EewTracker(place.pref, place.area)
         self.enabled = True  # False when the connection limit of the service is used up by other entries
         self.connected = False
         self.down_since: datetime | None = dt_util.utcnow()
@@ -95,7 +96,8 @@ class QuakeClient:
                 self.last_quake = parsed
                 self._on_quake()
             quake = self._quakes.feed(msg)
-            if quake and quake.pref_max_scale is not None and not (
+            # The event follows the entry's scope: its area (23 wards of Tokyo) or, without one, its prefecture.
+            if quake and quake.scope_max_scale is not None and not (
                 backfill and quake.time
                 and (now - quake.time).total_seconds() > QUAKE_BACKFILL_MAX_AGE_S
             ):

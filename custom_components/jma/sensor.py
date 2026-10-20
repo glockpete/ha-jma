@@ -420,8 +420,9 @@ class JapanSensor(_CoordSensor):
 
 
 class LastEarthquakeSensor(JmaEntity, SensorEntity):
-    """Origin time of the newest quake P2P reported, with the intensity in the prefecture and at the
-    configured place (pref_max_scale / pref_shindo, local_scale / local_shindo)."""
+    """Origin time of the newest quake P2P reported, with the intensity in the prefecture, in the area (the 23
+    wards of Tokyo only) and at the configured place (pref_max_scale / pref_shindo, area_max_scale /
+    area_shindo, local_scale / local_shindo)."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_icon = "mdi:waveform"
@@ -455,6 +456,7 @@ class LastEarthquakeSensor(JmaEntity, SensorEntity):
         if q is None:  # before any quake: the entry's own place
             place = self.runtime.quake.place
             attrs["pref"] = place.pref
+            attrs["area"] = place.area
             attrs["local_name"] = place.local_name
         attrs["connected"] = self.runtime.quake.connected
         return attrs

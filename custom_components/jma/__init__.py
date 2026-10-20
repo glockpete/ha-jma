@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import datetime, timedelta
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.const import Platform
@@ -70,6 +72,16 @@ SIMULATE_SCHEMA = vol.Schema({
 })
 
 
+def _legacy_name(data: Mapping[str, Any]) -> str | None:
+    """The Japanese municipality name of an entry made before 0.6: it was stored only as `area_name`. That key
+    holds the numeric area code instead when no name was stored (the setup reads it with the code as default), so
+    only a non-empty text that is not the entry's area code counts as a name."""
+    name = data.get("area_name")
+    if isinstance(name, str) and name and name != data.get(CONF_AREA):
+        return name
+    return None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
     data = {**entry.data, **entry.options}
     cfg = JmaConfig(
@@ -85,9 +97,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
     api = JmaApi(async_get_clientsession(hass))
     fire = make_fire(hass, entry.entry_id)
     # The quake part: the prefecture comes from the office code, the local name is the Japanese name of
-    # the area as stored by the config flow. Without a stored name the local values are unknown and nothing
-    # else is affected.
-    place = QuakePlace(prefecture_for_office(cfg.office), data.get(CONF_AREA_NAME_JA) or None)
+    # the area as stored by the config flow (before 0.6: under `area_name`). Without a stored name the local
+    # values are unknown and nothing else is affected. An entry in one of the 23 wards of Tokyo also gets the
+    # area 東京都２３区, chosen by its area code.
+    local_name = data.get(CONF_AREA_NAME_JA) or _legacy_name(data)
+    place = QuakePlace.for_entry(prefecture_for_office(cfg.office), local_name, cfg.area)
     # What was already announced about typhoons, heat alerts and tsunami survives a restart.
     memory = AlertMemory(hass, entry.entry_id)
     await memory.async_load()
