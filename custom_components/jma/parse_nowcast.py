@@ -20,6 +20,13 @@ from .errors import JmaParseError
 
 _LOGGER = logging.getLogger(__name__)
 _UNKNOWN_SEEN: set[tuple[int, int, int]] = set()
+TILE_SIZE = 256  # what the JMA tile servers send (hrpns, rasrf, risk); any other size is not a tile
+# A pixel farther than this (squared RGB distance) from EVERY palette colour is unknown and reads as 0, not as the
+# nearest band: a black or grey placeholder served with HTTP 200 must not read as rain or as キキクル level 5.
+# 225 = 15**2: above the 200 of the near colours the tests use ((250, 225, 10) next to #f2e700), below the 288 between
+# black and the level-5 colour #0c000c and the 338 between white and the lightest rain band #f2f2ff. Two palette
+# colours are at least 5300 apart, so a colour inside it has one nearest.
+PALETTE_TOLERANCE_SQ = 225
 
 
 def tile_for(lat: float, lon: float, z: int) -> tuple[int, int, int, int]:
@@ -32,6 +39,17 @@ def tile_for(lat: float, lon: float, z: int) -> tuple[int, int, int, int]:
     return x, y, int((xf - x) * 256), int((yf - y) * 256)
 
 
+def nearest_colour(
+    palette: dict[tuple[int, int, int], int], rgb: tuple[int, int, int]
+) -> tuple[int, int, int] | None:
+    """The palette colour nearest to `rgb`, or None when none is within PALETTE_TOLERANCE_SQ."""
+    r, g, b = rgb
+    nearest = min(palette, key=lambda c: (c[0] - r) ** 2 + (c[1] - g) ** 2 + (c[2] - b) ** 2)
+    if (nearest[0] - r) ** 2 + (nearest[1] - g) ** 2 + (nearest[2] - b) ** 2 > PALETTE_TOLERANCE_SQ:
+        return None
+    return nearest
+
+
 def _band_of(rgba: tuple[int, int, int, int]) -> int:
     r, g, b, a = rgba
     if a < 128:
@@ -39,25 +57,42 @@ def _band_of(rgba: tuple[int, int, int, int]) -> int:
     band = RAIN_PALETTE.get((r, g, b))
     if band is not None:
         return band
-    nearest = min(RAIN_PALETTE, key=lambda c: (c[0] - r) ** 2 + (c[1] - g) ** 2 + (c[2] - b) ** 2)
+    nearest = nearest_colour(RAIN_PALETTE, (r, g, b))
+    band = 0 if nearest is None else RAIN_PALETTE[nearest]
     if (r, g, b) not in _UNKNOWN_SEEN:
         _UNKNOWN_SEEN.add((r, g, b))
-        _LOGGER.info("Unlisted nowcast colour %s mapped to band %s", (r, g, b), RAIN_PALETTE[nearest])
-    return RAIN_PALETTE[nearest]
+        _LOGGER.info("Unlisted nowcast colour %s mapped to band %s", (r, g, b), band)
+    return band
+
+
+def tile_block(png: bytes, px: int, py: int, radius: int, what: str) -> list[tuple[int, int, int, int]]:
+    """RGBA pixels of the (2r+1)^2 block around (px, py), clamped to the tile (empty when the block lies outside it).
+
+    JmaParseError unless `png` is a TILE_SIZE x TILE_SIZE PNG. Pillow opens lazily, so the size is read from the
+    header before a pixel is decoded: a few hundred bytes declaring 9000x9000 are refused, not inflated. Only the
+    cropped block is converted to RGBA.
+    """
+    try:
+        img = Image.open(io.BytesIO(png), formats=["PNG"])
+    except Exception as err:  # Pillow raises several unrelated types (DecompressionBombError among them)
+        raise JmaParseError(f"{what}: {err!r}") from err
+    with img:
+        if img.size != (TILE_SIZE, TILE_SIZE):
+            raise JmaParseError(f"{what}: {img.size[0]}x{img.size[1]} is not a {TILE_SIZE}x{TILE_SIZE} tile")
+        box = (max(0, px - radius), max(0, py - radius),
+               min(TILE_SIZE, px + radius + 1), min(TILE_SIZE, py + radius + 1))
+        if box[2] <= box[0] or box[3] <= box[1]:
+            return []
+        try:
+            block = img.crop(box).convert("RGBA")
+        except Exception as err:  # a truncated or corrupt stream
+            raise JmaParseError(f"{what}: {err!r}") from err
+        return [block.getpixel((x, y)) for y in range(block.height) for x in range(block.width)]  # type: ignore[misc]
 
 
 def band_at(png: bytes, px: int, py: int, radius: int = 2) -> int:
     """Highest rain band in the (2r+1)^2 pixel block around (px, py); clamped to the tile."""
-    try:
-        img = Image.open(io.BytesIO(png)).convert("RGBA")
-    except Exception as err:  # Pillow raises several unrelated types
-        raise JmaParseError(f"nowcast tile: {err!r}") from err
-    w, h = img.size
-    best = 0
-    for y in range(max(0, py - radius), min(h, py + radius + 1)):
-        for x in range(max(0, px - radius), min(w, px + radius + 1)):
-            best = max(best, _band_of(img.getpixel((x, y))))  # type: ignore[arg-type]
-    return best
+    return max((_band_of(rgba) for rgba in tile_block(png, px, py, radius, "nowcast tile")), default=0)
 
 
 def parse_jma_time(value: str) -> datetime:

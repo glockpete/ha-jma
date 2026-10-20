@@ -407,7 +407,8 @@ def test_kikikuru_palette_exact_nearest_transparent():
     }
     png = _png(px)
     level = {x: kikikuru_level_at(png, x, 10, "land", radius=0) for x in range(10, 90, 10)}
-    assert level == {10: 1, 20: 2, 30: 3, 40: 4, 50: 5, 60: 1, 70: 2, 80: 0}
+    # #3cffff (60) is flood_mesh's level 1 and on no land colour's doorstep: unknown (0), not the nearest (white)
+    assert level == {10: 1, 20: 2, 30: 3, 40: 4, 50: 5, 60: 0, 70: 2, 80: 0}
     assert kikikuru_level_at(png, 60, 10, "flood_mesh", radius=0) == 1  # #3cffff is flood L1
     assert kikikuru_level_at(png, 50, 10, "flood_mesh", radius=0) == 5
     assert kikikuru_level_at(png, 42, 12, "inund") == 4  # 5x5 block reaches (40, 10)

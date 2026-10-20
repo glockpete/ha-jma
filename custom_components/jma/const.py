@@ -157,6 +157,13 @@ NOWCAST_ZOOM: Final = 10
 NOWCAST_PAST_FRAMES: Final = 12  # 60 minutes at 5 minutes
 RAIN_BAND_RAIN: Final = 2  # band >= 2 means >= 1 mm/h
 RAIN_REARM: Final = timedelta(minutes=60)
+# What one poll fans out to when a feed lists far more than JMA ever does (a broken or hostile feed): only the
+# first entries are read. The captured feeds list 1 storm, 12 nowcast forecast frames (5-min steps) and 13 rasrf
+# frames. At most TILE_MAX_INFLIGHT of those requests are in flight at once.
+TYPHOON_MAX_STORMS: Final = 8
+NOWCAST_MAX_FORECAST: Final = 13
+RASRF_MAX_FRAMES: Final = 16
+TILE_MAX_INFLIGHT: Final = 6
 
 # Feed-health thresholds.
 HEALTH_GRACE: Final = timedelta(minutes=30)

@@ -37,9 +37,13 @@ from .const import (
     INTERVAL_XML,
     KIKIKURU_ELEMENTS,
     LAYERS_ZOOM,
+    NOWCAST_MAX_FORECAST,
     NOWCAST_PAST_FRAMES,
     NOWCAST_ZOOM,
+    RASRF_MAX_FRAMES,
     STALE_FACTOR,
+    TILE_MAX_INFLIGHT,
+    TYPHOON_MAX_STORMS,
     URL_AMEDAS_LATEST,
     URL_AMEDAS_POINT,
     URL_AMEDAS_TABLE,
@@ -126,6 +130,21 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 T = TypeVar("T")
+
+
+def _first(items: list[T], limit: int, what: str) -> list[T]:
+    """The first `limit` entries of a feed's list. The rest is ignored (one DEBUG line), so a feed that lists
+    thousands cannot make one poll fan out to thousands of requests."""
+    if len(items) > limit:
+        _LOGGER.debug("%s: %d listed, only the first %d are read", what, len(items), limit)
+        return items[:limit]
+    return items
+
+
+async def _limited(sem: asyncio.Semaphore, request: Callable[..., Any], *args: Any) -> Any:
+    """One request of a fan-out; the poll's semaphore keeps at most TILE_MAX_INFLIGHT of them in flight."""
+    async with sem:
+        return await request(*args)
 
 
 def signal_alert(entry_id: str) -> str:
@@ -289,10 +308,14 @@ class AmedasCoordinator(_JmaCoordinator[Observation]):
     async def _fetch(self) -> Observation:
         latest = parse_latest_time(await self.api.get_text(URL_AMEDAS_LATEST))
         ymd, hh = point_file_parts(latest)
-        primary, secondary = await asyncio.gather(
-            self._station(self.cfg.station_primary, ymd, hh),
-            self._station(self.cfg.station_secondary, ymd, hh),
-        )
+        if self.cfg.station_secondary == self.cfg.station_primary:
+            # The nearest station is also the type-A one: ask for it once; it has nothing to fill from.
+            primary, secondary = await self._station(self.cfg.station_primary, ymd, hh), None
+        else:
+            primary, secondary = await asyncio.gather(
+                self._station(self.cfg.station_primary, ymd, hh),
+                self._station(self.cfg.station_secondary, ymd, hh),
+            )
         if primary is None and secondary is None:
             raise JmaError("amedas: neither station answered")
         return merge_observations(primary, secondary)
@@ -406,11 +429,11 @@ class NowcastCoordinator(_JmaCoordinator[NowcastState]):
         # platforms are set up) would be disarmed with nobody listening, and never pushed.
         self.alerts_ready = False
 
-    async def _band(self, basetime: str, validtime: str) -> int | None:
+    async def _band(self, basetime: str, validtime: str, sem: asyncio.Semaphore) -> int | None:
         key = (basetime, validtime)
         if key not in self._bands:
             x, y, px, py = self._tile
-            png = await self.api.get_bytes(URL_NOWC_TILE.format(
+            png = await _limited(sem, self.api.get_bytes, URL_NOWC_TILE.format(
                 basetime=basetime, validtime=validtime, z=NOWCAST_ZOOM, x=x, y=y))
             if png is None:
                 return None  # not on the CDN yet: ask again next poll, never cache it as dry
@@ -424,8 +447,10 @@ class NowcastCoordinator(_JmaCoordinator[NowcastState]):
             self.api.get_json(URL_NOWC_TIMES.format(n="N2")),
         )
         basetime, past, forecast = frame_lists(n1, n2, NOWCAST_PAST_FRAMES)
+        forecast = _first(forecast, NOWCAST_MAX_FORECAST, "nowcast forecast frames")
         valid = [basetime, *forecast]
-        bands = await asyncio.gather(*(self._band(basetime, v) for v in valid))
+        sem = asyncio.Semaphore(TILE_MAX_INFLIGHT)
+        bands = await asyncio.gather(*(self._band(basetime, v, sem) for v in valid))
         # Tiles for a basetime never change; keep only the current basetime's.
         self._bands = {k: v for k, v in self._bands.items() if k[0] == basetime}
         rain = rain_series(basetime, list(zip(valid, bands, strict=False)))
@@ -480,12 +505,12 @@ class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
         self._tracker = ApproachTracker(self._memory)
         self._fresh: set[str] = set()  # storms parsed in the current poll (not kept from last-good)
 
-    async def _storm(self, tc: dict[str, Any], now: datetime) -> dict[str, Any]:
+    async def _storm(self, tc: dict[str, Any], now: datetime, sem: asyncio.Semaphore) -> dict[str, Any]:
         """One storm; a failed fetch keeps that storm's last good entry while it is fresh."""
         try:
             forecast, specs = await asyncio.gather(
-                self.api.get_json(URL_TYPHOON_FORECAST.format(tc=tc["id"])),
-                self.api.get_json(URL_TYPHOON_SPECS.format(tc=tc["id"])),
+                _limited(sem, self.api.get_json, URL_TYPHOON_FORECAST.format(tc=tc["id"])),
+                _limited(sem, self.api.get_json, URL_TYPHOON_SPECS.format(tc=tc["id"])),
             )
             storm = parse_storm(tc, forecast, specs, (self.cfg.latitude, self.cfg.longitude))
         except (JmaError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
@@ -535,9 +560,10 @@ class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
             listed = json.loads(body)
         except ValueError as err:
             raise JmaParseError(f"typhoon targetTc: not JSON ({body[:60]!r})") from err
-        tcs = parse_target_tc(listed)
+        tcs = _first(parse_target_tc(listed), TYPHOON_MAX_STORMS, "typhoon storms")
         self._fresh = set()
-        storms = list(await asyncio.gather(*(self._storm(tc, now) for tc in tcs)))
+        sem = asyncio.Semaphore(TILE_MAX_INFLIGHT)
+        storms = list(await asyncio.gather(*(self._storm(tc, now, sem) for tc in tcs)))
         live = {tc["id"] for tc in tcs}
         self._storms = {k: v for k, v in self._storms.items() if k in live}
         return TyphoonState(len(tcs), fit_storms(self._approach(storms, now)))
@@ -764,11 +790,11 @@ class LayersCoordinator(_JmaCoordinator[LayersState]):
         else:
             self._kikikuru.ok(reading, listed_at)
 
-    async def _rasrf_band(self, frame: dict[str, str]) -> int | None:
+    async def _rasrf_band(self, frame: dict[str, str], sem: asyncio.Semaphore) -> int | None:
         key = (frame["basetime"], frame["member"], frame["validtime"])
         if key not in self._rasrf_bands:
             x, y, px, py = self._tile
-            png = await self.api.get_bytes(URL_RASRF_TILE.format(
+            png = await _limited(sem, self.api.get_bytes, URL_RASRF_TILE.format(
                 basetime=frame["basetime"], member=frame["member"], validtime=frame["validtime"],
                 z=LAYERS_ZOOM, x=x, y=y))
             if png is None:
@@ -781,8 +807,10 @@ class LayersCoordinator(_JmaCoordinator[LayersState]):
         if not rasrf or listed_at is None:
             return
         basetime, frames = rasrf
+        frames = _first(frames, RASRF_MAX_FRAMES, "rasrf frames")
+        sem = asyncio.Semaphore(TILE_MAX_INFLIGHT)
         try:
-            bands = await asyncio.gather(*(self._rasrf_band(f) for f in frames))
+            bands = await asyncio.gather(*(self._rasrf_band(f, sem) for f in frames))
         except JmaError as err:
             self._rain.fail(err)
             _LOGGER.debug("rain outlook: %s", err)

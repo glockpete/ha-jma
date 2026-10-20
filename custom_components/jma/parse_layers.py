@@ -15,13 +15,10 @@ targetTimes files are lists of {basetime, validtime, elements[, member]}:
 
 from __future__ import annotations
 
-import io
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Generic, TypeVar
-
-from PIL import Image
 
 from .const import (
     BAND_MMH,
@@ -44,7 +41,7 @@ from .const import (
     URL_TRNS_TILE,
 )
 from .errors import JmaParseError
-from .parse_nowcast import parse_jma_time
+from .parse_nowcast import nearest_colour, parse_jma_time, tile_block
 
 _LOGGER = logging.getLogger(__name__)
 _UNKNOWN_SEEN: set[tuple[str, tuple[int, int, int]]] = set()
@@ -205,26 +202,19 @@ def _level_of(rgba: tuple[int, int, int, int], palette: dict[tuple[int, int, int
     level = palette.get((r, g, b))
     if level is not None:
         return level
-    nearest = min(palette, key=lambda c: (c[0] - r) ** 2 + (c[1] - g) ** 2 + (c[2] - b) ** 2)
+    nearest = nearest_colour(palette, (r, g, b))  # None: farther than the tolerance from every palette colour
+    level = 0 if nearest is None else palette[nearest]
     if (name, (r, g, b)) not in _UNKNOWN_SEEN:
         _UNKNOWN_SEEN.add((name, (r, g, b)))
-        _LOGGER.info("Unlisted %s colour %s mapped to level %s", name, (r, g, b), palette[nearest])
-    return palette[nearest]
+        _LOGGER.info("Unlisted %s colour %s mapped to level %s", name, (r, g, b), level)
+    return level
 
 
 def kikikuru_level_at(png: bytes, px: int, py: int, element: str, radius: int = 2) -> int:
     """Highest キキクル level (0-5) in the (2r+1)^2 block around (px, py), as the nowcast pixel."""
     palette = KIKIKURU_FLOOD_PALETTE if element == "flood_mesh" else KIKIKURU_PALETTE
-    try:
-        img = Image.open(io.BytesIO(png)).convert("RGBA")
-    except Exception as err:  # Pillow raises several unrelated types
-        raise JmaParseError(f"{element} tile: {err!r}") from err
-    w, h = img.size
-    best = 0
-    for y in range(max(0, py - radius), min(h, py + radius + 1)):
-        for x in range(max(0, px - radius), min(w, px + radius + 1)):
-            best = max(best, _level_of(img.getpixel((x, y)), palette, element))  # type: ignore[arg-type]
-    return best
+    return max((_level_of(rgba, palette, element) for rgba in tile_block(png, px, py, radius, f"{element} tile")),
+               default=0)
 
 
 @dataclass(frozen=True)
