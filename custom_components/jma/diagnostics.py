@@ -1,7 +1,8 @@
 """Diagnostics: configuration and the health of each feed.
 
 The place is hidden: coordinates, the area code and names, both station ids and the entry title are
-redacted (also where they sit inside an error message). The office code (prefecture level) stays.
+redacted (also where they sit inside an error message), and so is the tsunami coast area (the area code in
+words). The office code (prefecture level) stays.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from .coordinator import JmaConfigEntry
 REDACTED = "**REDACTED**"
 TO_REDACT = {
     "latitude", "longitude",
-    "area", "area_name", "area_name_ja", "class10",
+    "area", "area_name", "area_name_ja", "class10", "home_area",
     "station_primary", "station_secondary",
     "title",
 }
@@ -83,14 +84,15 @@ async def async_get_config_entry_diagnostics(
             "down_since": rt.quake.down_since.isoformat() if rt.quake.down_since else None,
             "last_message": rt.quake.last_message.isoformat() if rt.quake.last_message else None,
         },
-        "tsunami": {
+        # The coast area is the class10 code in words (東京湾内湾 for 130010), so it is redacted like the code.
+        "tsunami": async_redact_data({
             "home_area": rt.quake.tsunami.home_area,
             "replayed": rt.quake.tsunami.replayed,
             "current_id": rt.quake.tsunami.current.id if rt.quake.tsunami.current else None,
             "issued": rt.quake.tsunami.current.issued.isoformat()
             if rt.quake.tsunami.current else None,
             "memory": dict(rt.quake.tsunami.memory),
-        },
+        }, TO_REDACT),
     }
     secrets = _secrets(entry)
     return {key: (value if key in ("entry", "config") else _scrub(value, secrets)) for key, value in out.items()}

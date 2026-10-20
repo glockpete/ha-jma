@@ -13,12 +13,15 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.util import dt as dt_util
 
 from .api import JmaApi
@@ -63,12 +66,14 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.EVENT, Platform.SENSOR, Platform.WEATHER]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 SERVICE_SIMULATE = "simulate"
+ATTR_CONFIG_ENTRY_ID = "config_entry_id"
 # The earthquake service allows two WebSocket connections per IP address; one is kept open per entry.
 MAX_QUAKE_SOCKETS = 2
 TSUNAMI_TICK = timedelta(minutes=10)
 SIMULATE_SCHEMA = vol.Schema({
     vol.Required("event_type"): vol.In(EVENT_TYPES),
     vol.Optional("data", default={}): dict,
+    vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string,
 })
 
 
@@ -80,6 +85,33 @@ def _legacy_name(data: Mapping[str, Any]) -> str | None:
     if isinstance(name, str) and name and name != data.get(CONF_AREA):
         return name
     return None
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """The action is registered once, here (HA quality scale: action-setup), not by each entry: one entry's unload
+    cannot take it away from another."""
+    hass.services.async_register(DOMAIN, SERVICE_SIMULATE, _simulate, schema=SIMULATE_SCHEMA)
+    return True
+
+
+async def _simulate(call: ServiceCall) -> None:
+    """Test-only: fire an alert event as if JMA/P2P had produced it, at the entry named by `config_entry_id` or, when
+    none is named, at every loaded entry whose debug option is on."""
+    hass = call.hass
+    if (entry_id := call.data.get(ATTR_CONFIG_ENTRY_ID)) is not None:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN or entry.state is not ConfigEntryState.LOADED:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="simulate_entry_not_found")
+        if not entry.runtime_data.debug_simulate:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="simulate_not_enabled")
+        targets = [entry]
+    else:
+        targets = [e for e in hass.config_entries.async_loaded_entries(DOMAIN) if e.runtime_data.debug_simulate]
+        if not targets:
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="simulate_no_debug_entry")
+    for target in targets:
+        payload = {**call.data["data"], "simulated": True}
+        async_dispatcher_send(hass, signal_alert(target.entry_id), call.data["event_type"], payload)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
@@ -162,7 +194,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
     sockets: set[str] = hass.data.setdefault(DOMAIN, {}).setdefault("quake_sockets", set())
     if len(sockets) < MAX_QUAKE_SOCKETS:
         sockets.add(entry.entry_id)
-        entry.async_on_unload(lambda: sockets.discard(entry.entry_id))
+
+        @callback
+        def release_socket() -> None:
+            sockets.discard(entry.entry_id)
+            if entry.disabled_by is not None:  # a disabled entry does not set up again: its connection goes on
+                _offer_free_socket(hass)
+
+        entry.async_on_unload(release_socket)
     else:
         runtime.quake.enabled = False
         _LOGGER.warning(
@@ -182,17 +221,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         # An entry without an earthquake connection has no tsunami bulletins to expire: no timer.
         entry.async_on_unload(async_track_time_interval(hass, tsunami_tick, TSUNAMI_TICK))
 
-    if runtime.debug_simulate:
-        async def simulate(call: ServiceCall) -> None:
-            """Test-only: fire an alert event as if JMA/P2P had produced it."""
-            payload = {**call.data["data"], "simulated": True}
-            async_dispatcher_send(hass, signal_alert(entry.entry_id), call.data["event_type"], payload)
-
-        hass.services.async_register(DOMAIN, SERVICE_SIMULATE, simulate, schema=SIMULATE_SCHEMA)
-        entry.async_on_unload(lambda: hass.services.async_remove(DOMAIN, SERVICE_SIMULATE))
-
     entry.async_on_unload(entry.add_update_listener(_reload))
     return True
+
+
+@callback
+def _offer_free_socket(hass: HomeAssistant) -> None:
+    """A removed or disabled entry gives its earthquake connection back. An entry that was set up while both were taken
+    has none until its next setup, so as many of those as there are free connections are reloaded to take them. A
+    plain reload of an entry does not come here: it takes its own connection again when it sets up."""
+    sockets: set[str] = hass.data.get(DOMAIN, {}).get("quake_sockets", set())
+    free = MAX_QUAKE_SOCKETS - len(sockets)
+    if free <= 0:
+        return
+    waiting = [e for e in hass.config_entries.async_loaded_entries(DOMAIN) if e.entry_id not in sockets]
+    for other in waiting[:free]:
+        _LOGGER.debug("Reloading %s: an earthquake connection is free", other.title)
+        hass.config_entries.async_schedule_reload(other.entry_id)
 
 
 def _settings(entry: JmaConfigEntry) -> dict:
@@ -215,5 +260,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> None:
-    """The alert memory file goes with the entry."""
+    """The alert memory file goes with the entry, and its earthquake connection to an entry that has none."""
+    _offer_free_socket(hass)
     await AlertMemory(hass, entry.entry_id).async_remove()

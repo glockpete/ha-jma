@@ -664,7 +664,10 @@ async def test_diagnostics_carry_a_tsunami_block(tokyo, aioclient_mock, entry, f
     diag = await async_get_config_entry_diagnostics(hass, entry)
     t = diag["tsunami"]
     assert t["current_id"] == msg["id"] and t["issued"] == "2024-01-01T16:22:32+09:00"
-    assert t["memory"]["max"] == "major_warning" and t["home_area"] == HOME
+    assert t["memory"]["max"] == "major_warning"
+    # the coast area is set for this place, and the download hides it (it is the class10 code in words)
+    assert entry.runtime_data.quake.tsunami.home_area == HOME and t["home_area"] == "**REDACTED**"
+    assert HOME not in json.dumps(diag, ensure_ascii=False)
     json.dumps(diag["tsunami"])
 
 

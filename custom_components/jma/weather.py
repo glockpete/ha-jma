@@ -20,9 +20,16 @@ from homeassistant.util import dt as dt_util
 from .const import ATTRIBUTION
 from .coordinator import JmaConfigEntry
 from .entity import JmaEntity
+from .parse_amedas import JST
 from .parse_forecast import DayForecast, condition_for, icon_for, name_for
 
 PARALLEL_UPDATES = 0
+
+
+def _japan_today() -> date:
+    """Today's date in Japan. JMA's dates (forecast days, the AMeDAS extremes) are Japan's, so they are not compared
+    with the date in the time zone Home Assistant is set to: that one is another day for hours of every day."""
+    return dt_util.utcnow().astimezone(JST).date()
 
 
 async def async_setup_entry(
@@ -92,7 +99,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
         f = self.runtime.forecast
         if not f.last_update_success or f.data is None:
             return None
-        today = dt_util.now().date()
+        today = _japan_today()
         for day in f.data.forecast.days:
             if day.date >= today:
                 return day
@@ -180,11 +187,11 @@ class JmaWeather(JmaEntity, WeatherEntity):
             def iso(value: datetime | None) -> str | None:
                 return value.isoformat() if value else None
 
-            today_local = dt_util.now().date()
+            today_jst = _japan_today()
 
             def todays(value: float | None, at: datetime | None) -> tuple[float | None, str | None]:
                 # The 00:00 row closes YESTERDAY (24:00): its extremes are not "today" (the feed repeats the previous day's extremes shortly after midnight).
-                if value is None or at is None or dt_util.as_local(at).date() != today_local:
+                if value is None or at is None or at.astimezone(JST).date() != today_jst:
                     return None, None
                 return value, at.isoformat()
 
@@ -209,7 +216,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
         if not f.last_update_success or f.data is None:
             return None
         tz = dt_util.get_default_time_zone()
-        today: date = dt_util.now().date()
+        today = _japan_today()
         rows: list[Forecast] = []
         for day in f.data.forecast.days:
             if day.date < today:

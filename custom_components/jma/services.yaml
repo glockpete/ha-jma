@@ -23,3 +23,8 @@ simulate:
       required: false
       selector:
         object:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: jma

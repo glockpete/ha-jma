@@ -5,9 +5,11 @@ from __future__ import annotations
 import dataclasses
 from datetime import timedelta
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
@@ -259,18 +261,21 @@ async def test_simulate_only_with_debug_option(tokyo: HomeAssistant, aioclient_m
     hass = tokyo
     mock_jma(aioclient_mock)
     await setup(hass, entry)
-    assert not hass.services.has_service(DOMAIN, "simulate")
+    # the action is registered once for the integration; with no debug entry loaded it refuses
+    assert hass.services.has_service(DOMAIN, "simulate")
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(DOMAIN, "simulate", {"event_type": "eew"}, blocking=True)
 
     debug = MockConfigEntry(domain=DOMAIN, title="JMA Test", unique_id="2710000",
                             data={**ENTRY_DATA, "area": "2710000"},
                             options={"debug_simulate": True})
     await setup(hass, debug)
-    assert hass.services.has_service(DOMAIN, "simulate")
     await hass.services.async_call(DOMAIN, "simulate", {
         "event_type": "eew", "data": {"predicted_shindo": "5-"}}, blocking=True)
     await hass.async_block_till_done()
     ev = hass.states.get("event.jma_test_alerts")
     assert ev.attributes["event_type"] == "eew" and ev.attributes["simulated"] is True
+    assert hass.states.get("event.jma_chiyoda_alerts").attributes.get("event_type") is None  # no debug option there
 
 
 async def test_feed_problem_after_thirty_minutes(tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:

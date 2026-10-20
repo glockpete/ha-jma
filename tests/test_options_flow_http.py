@@ -3,7 +3,9 @@ schema into form fields. Regression: on Home Assistant 2026.9 the form answered 
 serialize schema: Match(...)`) while every test that called the flow in Python passed."""
 from __future__ import annotations
 
+import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.setup import async_setup_component
 
 from .conftest import mock_jma, setup
@@ -31,11 +33,13 @@ async def test_the_options_form_is_served_over_http(tokyo: HomeAssistant, aiocli
     assert fields["debug_simulate"]["default"] is False
 
 
-async def test_the_options_form_saves_over_http_and_registers_simulate(tokyo: HomeAssistant, aioclient_mock, entry,
-                                                                        hass_client) -> None:
+async def test_the_options_form_saves_over_http_and_enables_simulate(tokyo: HomeAssistant, aioclient_mock, entry,
+                                                                      hass_client) -> None:
     hass = tokyo
     client = await _client(hass, aioclient_mock, entry, hass_client)
-    assert not hass.services.has_service("jma", "simulate")
+    # the action is registered once for the integration; it needs an entry with the debug option on
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call("jma", "simulate", {"event_type": "eew"}, blocking=True)
     flow = await (await client.post(FLOW, json={"handler": entry.entry_id})).json()
     response = await client.post(f"{FLOW}/{flow['flow_id']}", json={
         "station_primary": entry.data["station_primary"], "station_secondary": entry.data["station_secondary"],
@@ -44,7 +48,10 @@ async def test_the_options_form_saves_over_http_and_registers_simulate(tokyo: Ho
     assert (await response.json())["type"] == "create_entry"
     await hass.async_block_till_done()
     assert entry.options["debug_simulate"] is True
-    assert hass.services.has_service("jma", "simulate")  # the entry reloaded with the option on
+    # the entry reloaded with the option on
+    await hass.services.async_call("jma", "simulate", {"event_type": "eew"}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get("event.jma_chiyoda_alerts").attributes["event_type"] == "eew"
 
 
 async def test_a_station_id_that_is_not_five_digits_is_refused_with_a_message(tokyo: HomeAssistant, aioclient_mock,

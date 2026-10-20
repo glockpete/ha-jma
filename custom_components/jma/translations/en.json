@@ -126,7 +126,7 @@
   "services": {
     "simulate": {
       "name": "Simulate alert (test only)",
-      "description": "Fires an alert event as if JMA or P2P had produced it. Only registered while the debug option is on.",
+      "description": "Fires an alert event as if JMA or P2P had produced it. Works for entries that have the debug option on.",
       "fields": {
         "event_type": {
           "name": "Event type",
@@ -135,8 +135,23 @@
         "data": {
           "name": "Data",
           "description": "Event data the automations read."
+        },
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "The JMA entry to fire the event at. Without it, every entry that has the debug option on gets it."
         }
       }
+    }
+  },
+  "exceptions": {
+    "simulate_entry_not_found": {
+      "message": "No loaded JMA entry has that id."
+    },
+    "simulate_not_enabled": {
+      "message": "That entry does not have the debug option on. Switch on \"Enable the jma.simulate test action\" in its options."
+    },
+    "simulate_no_debug_entry": {
+      "message": "No JMA entry has the debug option on. Switch on \"Enable the jma.simulate test action\" in the options of an entry."
     }
   }
 }

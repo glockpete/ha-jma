@@ -11,6 +11,7 @@ from unittest.mock import patch
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
+from custom_components.jma.parse_amedas import JST
 from custom_components.jma.parse_forecast import condition_for
 
 from .conftest import mock_jma, setup
@@ -21,7 +22,7 @@ async def _sunny_today(hass: HomeAssistant, entry) -> None:
     runtime = entry.runtime_data
     runtime.nowcast.async_set_updated_data(dataclasses.replace(runtime.nowcast.data, wet=False))
     bundle = runtime.forecast.data
-    today = dt_util.now().date()
+    today = dt_util.utcnow().astimezone(JST).date()  # JMA's dates are Japan's, not those of Home Assistant's zone
     days = [dataclasses.replace(d, code="100") if d.date == today else d for d in bundle.forecast.days]
     forecast = dataclasses.replace(bundle.forecast, days=days)
     runtime.forecast.async_set_updated_data(dataclasses.replace(bundle, forecast=forecast))

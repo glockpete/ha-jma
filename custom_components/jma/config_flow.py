@@ -7,6 +7,7 @@ chosen by distance: primary = nearest measuring temperature, secondary = nearest
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import unicodedata
@@ -35,7 +36,12 @@ from .const import (
     URL_AMEDAS_TABLE,
     URL_AREA,
 )
-from .errors import JmaError
+from .errors import JmaError, JmaParseError
+
+_LOGGER = logging.getLogger(__name__)
+# What a file of the wrong shape raises on its way through the code that reads it: JSON that is valid but not what
+# JMA publishes (a list for an object, a missing key, a row without coordinates) must end the flow, not crash it.
+_SHAPE_ERRORS = (JmaError, LookupError, TypeError, AttributeError, ValueError)
 
 
 def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -53,8 +59,10 @@ def pick_stations(table: dict[str, Any], lat: float, lon: float) -> tuple[str, s
         slon = st["lon"][0] + st["lon"][1] / 60
         rows.append((_km(lat, lon, slat, slon), sid, st))
     rows.sort(key=lambda r: r[0])
-    primary = next(r for r in rows if str(r[2].get("elems", "0"))[:1] == "1")
-    secondary = next(r for r in rows if r[2].get("type") == "A")
+    primary = next((r for r in rows if str(r[2].get("elems", "0"))[:1] == "1"), None)
+    secondary = next((r for r in rows if r[2].get("type") == "A"), None)
+    if primary is None or secondary is None:
+        raise JmaParseError("the station table has no station with temperature or no type A station")
     return primary[1], secondary[1], primary[0], secondary[0]
 
 
@@ -96,9 +104,14 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._office = user_input[CONF_OFFICE]
             return await self.async_step_area()
-        offices = self._area_json["offices"]
-        options = [SelectOptionDict(value=code, label=f"{o['name']} ({code})")
-                   for code, o in sorted(offices.items())]
+        try:
+            options = [SelectOptionDict(value=code, label=f"{o['name']} ({code})")
+                       for code, o in sorted(self._area_json["offices"].items())]
+        except _SHAPE_ERRORS as err:
+            _LOGGER.warning("The JMA area list is not in the expected shape: %r", err)
+            options = []
+        if not options:
+            return self.async_abort(reason="cannot_connect")
         return self.async_show_form(step_id="user", data_schema=vol.Schema({
             vol.Required(CONF_OFFICE): SelectSelector(SelectSelectorConfig(
                 options=options, mode=SelectSelectorMode.DROPDOWN)),
@@ -111,12 +124,17 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_configured()
             return await self.async_step_confirm()
         options = []
-        for code, c20 in sorted(self._area_json["class20s"].items()):
-            try:
-                if area_chain(self._area_json, code)[1] == self._office:
-                    options.append(SelectOptionDict(value=code, label=f"{c20['name']} ({code})"))
-            except KeyError:
-                continue
+        try:
+            for code, c20 in sorted(self._area_json["class20s"].items()):
+                try:
+                    if area_chain(self._area_json, code)[1] == self._office:
+                        options.append(SelectOptionDict(value=code, label=f"{c20['name']} ({code})"))
+                except (LookupError, TypeError, AttributeError):
+                    continue
+        except _SHAPE_ERRORS as err:
+            _LOGGER.warning("The JMA area list is not in the expected shape: %r", err)
+        if not options:
+            return self.async_abort(reason="cannot_connect")
         return self.async_show_form(step_id="area", data_schema=vol.Schema({
             vol.Required(CONF_AREA): SelectSelector(SelectSelectorConfig(
                 options=options, mode=SelectSelectorMode.DROPDOWN)),
@@ -124,33 +142,37 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         assert self._area is not None
-        if self._stations is None:
-            self._stations = pick_stations(
-                self._amedas, self.hass.config.latitude, self.hass.config.longitude)
-        primary, secondary, pkm, skm = self._stations
-        area = self._area_json["class20s"][self._area]
-        if user_input is not None:
+        try:
+            if self._stations is None:
+                self._stations = pick_stations(
+                    self._amedas, self.hass.config.latitude, self.hass.config.longitude)
+            primary, secondary, pkm, skm = self._stations
+            area = self._area_json["class20s"][self._area]
             class10, office = area_chain(self._area_json, self._area)
+            title = device_title(self._area_json, self._area)
+            area_name = area["name"]
+            placeholders = {
+                "area": f"{area_name} ({self._area})",
+                "primary": f"{self._amedas[primary]['kjName']} {primary} ({pkm:.1f} km)",
+                "secondary": f"{self._amedas[secondary]['kjName']} {secondary} ({skm:.1f} km)",
+            }
+        except _SHAPE_ERRORS as err:
+            _LOGGER.warning("The JMA area list or the station table is not in the expected shape: %r", err)
+            return self.async_abort(reason="cannot_connect")
+        if user_input is not None:
             return self.async_create_entry(
-                title=device_title(self._area_json, self._area),
+                title=title,
                 data={
                     CONF_OFFICE: office,
                     CONF_AREA: self._area,
-                    "area_name": area["name"],
-                    CONF_AREA_NAME_JA: area["name"],  # the quake part matches addresses with it
+                    "area_name": area_name,
+                    CONF_AREA_NAME_JA: area_name,  # the quake part matches addresses with it
                     "class10": class10,
                     CONF_STATION_PRIMARY: primary,
                     CONF_STATION_SECONDARY: secondary,
                 },
             )
-        return self.async_show_form(
-            step_id="confirm",
-            description_placeholders={
-                "area": f"{area['name']} ({self._area})",
-                "primary": f"{self._amedas[primary]['kjName']} {primary} ({pkm:.1f} km)",
-                "secondary": f"{self._amedas[secondary]['kjName']} {secondary} ({skm:.1f} km)",
-            },
-        )
+        return self.async_show_form(step_id="confirm", description_placeholders=placeholders)
 
     @staticmethod
     @callback
