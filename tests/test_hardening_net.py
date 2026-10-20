@@ -89,6 +89,23 @@ def test_n1_one_known_grade_among_unknown_ones_still_makes_a_bulletin():
     assert bulletin is not None and any(a.rank for a in bulletin.areas)
 
 
+@pytest.mark.parametrize("value", [10**400, -(10**400), float("nan"), float("inf"), float("-inf")],
+                         ids=["huge", "-huge", "nan", "inf", "-inf"])
+def test_n1_a_wave_height_that_is_not_a_finite_number_reads_as_unknown(value):
+    msg = _warning_bulletin()
+    msg["areas"][0]["maxHeight"] = {"description": "3m", "value": value}
+    bulletin = parse_552(msg)
+    assert bulletin is not None
+    assert bulletin.areas[0].height_m is None and bulletin.areas[0].height == "3m"
+    assert all(math.isfinite(a.height_m) for a in bulletin.areas if a.height_m is not None)
+
+
+def test_n1_a_finite_wave_height_is_kept():
+    msg = _warning_bulletin()
+    msg["areas"][0]["maxHeight"] = {"description": "3m", "value": 3}
+    assert parse_552(msg).areas[0].height_m == 3.0
+
+
 def test_n1_a_real_cancel_frame_still_cancels():
     warn = _warning_bulletin()
     tracker = TsunamiTracker(HOME, {})

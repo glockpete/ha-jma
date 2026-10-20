@@ -31,7 +31,8 @@ and the project uses [semantic versioning](https://semver.org/).
 
 Found by a hostile review of the feeds, the sockets and the setup (each fix has a regression test):
 
-- A tsunami bulletin whose areas all have the grade "Unknown" no longer clears an active warning.
+- A tsunami bulletin whose areas all have the grade "Unknown" no longer clears an active warning, and a wave height
+  that is not a finite number reads as unknown instead of dropping the whole bulletin.
 - An earthquake report dated in the future no longer pins the "last earthquake" sensor, and one malformed station
   in a report no longer drops the whole report. An early-warning area with an invalid intensity value still raises
   the alert.

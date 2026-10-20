@@ -8,6 +8,7 @@ was last told. A cancellation has `cancelled: true` and no areas.
 from __future__ import annotations
 
 import logging
+import math
 from collections import OrderedDict
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -91,11 +92,22 @@ def _parse_area(raw: Any) -> TsunamiArea | None:
         rank=rank,
         immediate=raw.get("immediate") is True,
         height=_str_or_none(height.get("description")),
-        height_m=float(value) if isinstance(value, int | float) and not isinstance(value, bool)
-        else None,
+        height_m=_finite_metres(value),
         arrival=parse_p2p_time(arrival) if isinstance(arrival, str) else None,
         condition=_str_or_none(first.get("condition")),
     )
+
+
+def _finite_metres(value: Any) -> float | None:
+    """A wave height in metres, or None when it is not a finite number (a bool, text, NaN, infinity, an integer too
+    big for a float): one bad area must not drop the bulletin."""
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        return None
+    try:
+        metres = float(value)
+    except OverflowError:
+        return None
+    return metres if math.isfinite(metres) else None
 
 
 def parse_552(msg: Any) -> TsunamiBulletin | None:
