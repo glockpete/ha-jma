@@ -23,6 +23,38 @@ and the project uses [semantic versioning](https://semver.org/).
 - Entries made before 0.6 stored the Japanese municipality name only under `area_name`; the quake part now finds
   it there when `area_name_ja` is missing (a numeric code under `area_name` is never taken as a name), so their
   `local_*` values are known.
+- `jma.simulate` is one action for all entries, always listed, with an optional `config_entry_id`. Without it, it
+  fires at every entry that has the test option on, and it says why when none has. Reloading or unloading one entry
+  no longer removes it for the others.
+
+### Fixed
+
+Found by a hostile review of the feeds, the sockets and the setup (each fix has a regression test):
+
+- A tsunami bulletin whose areas all have the grade "Unknown" no longer clears an active warning.
+- An earthquake report dated in the future no longer pins the "last earthquake" sensor, and one malformed station
+  in a report no longer drops the whole report. An early-warning area with an invalid intensity value still raises
+  the alert.
+- Oversized, deeply nested or redirected answers from JMA and the P2P service are refused instead of exhausting
+  memory or following another host. A failing earthquake-history lookup no longer drops the live connection or
+  delays early warnings. A flood of malformed live messages writes one log warning every five minutes. The
+  early-warning memory is bounded.
+- One unreadable timestamp in the warnings file no longer freezes the warnings sensor. A heat-alert file dated in
+  the future is ignored, so it cannot block the next real alert.
+- Absurd numbers (infinity, huge integers) or an oversized CSV field in a feed keep the last good data and log one
+  warning line instead of making the integration unavailable at once. A typhoon with a nonsensical storm-warning
+  radius no longer triggers a false "typhoon approaching".
+- A map tile that is not exactly 256 x 256 or not a PNG is refused before it is decoded. A solid black, white or
+  grey tile served in place of a rain or キキクル tile reads as "no data" instead of heavy rain or a high level. One
+  poll reads at most 8 storms, 13 nowcast frames and 16 outlook frames, with at most 6 requests at once. The same
+  station as nearest and second station is fetched once.
+- The weather entity uses Japan's date for "today" whatever time zone Home Assistant is set to; before, the forecast
+  day and today's high and low could be a day out for some hours.
+- When an entry is removed or disabled, its earthquake connection passes to an entry that has none, with no restart.
+- A damaged or maintenance-page area list or station table ends setup with "could not reach the server" instead of
+  "Unknown error"; an empty office list no longer shows an empty drop-down.
+- Diagnostics hide the tsunami coast area, which is the area code in words.
+- The bug-report form no longer asks for a municipality and says which parts of a log can point to your area.
 
 ## 0.6.0 - first public release
 

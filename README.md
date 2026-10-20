@@ -267,7 +267,9 @@ automation:
 ```
 
 With the option **Enable the jma.simulate test action** switched on, the action `jma.simulate` fires any of these events with data of
-your choice, to try an automation without waiting for the real thing.
+your choice, to try an automation without waiting for the real thing. The action is always listed; it reaches every
+entry that has the option on, or only the entry you name in the optional field `config_entry_id`, and says so when
+no entry has the option on.
 
 ## Update intervals
 
