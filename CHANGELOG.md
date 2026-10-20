@@ -44,10 +44,11 @@ Found by a hostile review of the feeds, the sockets and the setup (each fix has 
 - Absurd numbers (infinity, huge integers) or an oversized CSV field in a feed keep the last good data and log one
   warning line instead of making the integration unavailable at once. A typhoon with a nonsensical storm-warning
   radius no longer triggers a false "typhoon approaching".
-- A map tile that is not exactly 256 x 256 or not a PNG is refused before it is decoded. A solid black, white or
-  grey tile served in place of a rain or キキクル tile reads as "no data" instead of heavy rain or a high level. One
-  poll reads at most 8 storms, 13 nowcast frames and 16 outlook frames, with at most 6 requests at once. The same
-  station as nearest and second station is fetched once.
+- A map tile that is not exactly 256 x 256 or not a PNG is refused before it is decoded. A solid black or grey
+  tile served in place of a rain or キキクル tile reads as "no data" instead of heavy rain or a high level (a solid
+  white tile is the real level 1 of the land and inundation layers, and stays so). One poll reads at most 8 storms,
+  13 nowcast forecast frames and 16 outlook frames, and each of those groups of requests has at most 6 in flight.
+  The same station as nearest and second station is fetched once.
 - The weather entity uses Japan's date for "today" whatever time zone Home Assistant is set to; before, the forecast
   day and today's high and low could be a day out for some hours.
 - When an entry is removed or disabled, its earthquake connection passes to an entry that has none, with no restart.

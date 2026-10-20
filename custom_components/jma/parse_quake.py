@@ -96,7 +96,7 @@ class QuakePlace:
         """A 551 point of the area: the area-level row (its address is the area name), or an address that, with
         a leading prefecture word ("東京都" or "東京") removed, STARTS with the name of a member. `startswith`,
         not `in`: a member's name inside another address ("東京八王子市港区町") does not count."""
-        if not self.area or not self.is_pref(point_pref) or not isinstance(addr, str):
+        if not self.area or self.pref is None or not self.is_pref(point_pref) or not isinstance(addr, str):
             return False
         text = _nfkc(addr)
         if text == _nfkc(self.area):
