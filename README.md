@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="JMA Weather (Unofficial) for Home Assistant: forecasts, warnings, rain radar, typhoons and earthquakes" width="100%">
+  <img src="docs/images/banner.jpg" alt="JMA Weather (Unofficial) for Home Assistant: forecasts, warnings, rain radar, typhoons and earthquakes" width="100%">
 </p>
 
 <p align="center">

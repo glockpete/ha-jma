@@ -36,9 +36,10 @@ def test_nothing_is_cut_off_at_the_edge(name):
     assert max(border) < 255, (name, max(border))
 
 
-@pytest.mark.parametrize("name", ["icon.png", "logo.png"])
-def test_dark_variant_is_really_different(name):
-    assert (BRAND / name).read_bytes() != (BRAND / f"dark_{name}").read_bytes()
+def test_dark_logo_is_really_different():
+    # the wordmark text is recoloured for dark themes; the icon art is theme-neutral, so dark_icon is a copy
+    assert (BRAND / "logo.png").read_bytes() != (BRAND / "dark_logo.png").read_bytes()
+    assert (BRAND / "icon.png").read_bytes() == (BRAND / "dark_icon.png").read_bytes()
 
 
 @pytest.mark.parametrize(("name", "size"), ICONS.items())
@@ -48,9 +49,11 @@ def test_icon_is_square_trimmed_and_transparent(name, size):
     corners = [image.getpixel(p)[3] for p in ((0, 0), (size - 1, 0), (0, size - 1), (size - 1, size - 1))]
     assert corners == [0, 0, 0, 0]
     left, top, right, bottom = image.getchannel("A").getbbox()
-    # trimmed: the mark is taller than wide, so it spans the full height (2 % anti-alias margin)
-    assert top <= size * 0.02 and bottom >= size * 0.98, (top, bottom)
-    assert left > 0 and right < size  # centred horizontally, not cropped
+    # trimmed: the longer side of the mark spans the canvas (2 % anti-alias margin), centred on the other
+    span_x, span_y = right - left, bottom - top
+    assert max(span_x, span_y) >= size * 0.96, (span_x, span_y)
+    assert left > 0 and top > 0 and right < size and bottom < size  # not cropped
+    assert abs((left + right) - size) <= size * 0.03 and abs((top + bottom) - size) <= size * 0.03
 
 
 @pytest.mark.parametrize(("name", "short"), LOGOS.items())
