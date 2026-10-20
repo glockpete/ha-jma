@@ -9,6 +9,7 @@ The temps / pops rules copy the JMA forecast page's own JS:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any
@@ -100,12 +101,14 @@ def name_for(code: str | None) -> tuple[str | None, str | None]:
 
 
 def _num(value: Any) -> float | None:
+    """A finite number, else None: JSON 1e400 parses to inf, and "nan" / "inf" strings float() happily."""
     if value in (None, ""):
         return None
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):  # OverflowError: an int too big for a float
         return None
+    return number if math.isfinite(number) else None
 
 
 def _int(value: Any) -> int | None:

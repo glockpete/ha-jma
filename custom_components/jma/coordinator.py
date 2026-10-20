@@ -7,6 +7,7 @@ the interval; after that the coordinator fails and its entities go unavailable.
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
 import logging
 from collections.abc import Callable
@@ -22,6 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import JmaApi
 from .const import (
+    EEW_FUTURE_TOLERANCE_S,
     IN_FORCE_AT_START_MIN_LEVEL,
     INTERVAL_AMEDAS,
     INTERVAL_FORECAST,
@@ -193,10 +195,10 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
             self.first_try = dt_util.utcnow()
         try:
             data = await self._fetch()
-        except (JmaError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
-            # Parser surprises (a ragged array, a bad time string, a field that changed its type) get
-            # the same keep-last-good treatment as fetch errors instead of HA's immediate unavailable
-            # and a traceback in the log.
+        except (JmaError, KeyError, IndexError, TypeError, ValueError, OverflowError, csv.Error, AttributeError) as err:
+            # Parser surprises (a ragged array, a bad time string, a field that changed its type, a number
+            # too big for a float, a CSV field over the reader's limit) get the same keep-last-good
+            # treatment as fetch errors instead of HA's immediate unavailable and a traceback in the log.
             if not isinstance(err, JmaError):
                 _LOGGER.warning("%s: unexpected payload: %r", self.name, err)
             self.last_error = str(err)
@@ -513,7 +515,7 @@ class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
                 _limited(sem, self.api.get_json, URL_TYPHOON_SPECS.format(tc=tc["id"])),
             )
             storm = parse_storm(tc, forecast, specs, (self.cfg.latitude, self.cfg.longitude))
-        except (JmaError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
+        except (JmaError, KeyError, IndexError, TypeError, ValueError, OverflowError, AttributeError) as err:
             # One storm's surprise (a bad shape, a failed file) must not mute the others:
             # keep its last good entry while fresh, else list it bare.
             prev = self._storms.get(tc["id"])
@@ -670,6 +672,12 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
             text = None if body is None else body.decode("utf-8", errors="replace")
             bulletin = None if text is None else parse_heat_alert(
                 text, self.cfg.office, self.station_names)
+            if bulletin is not None and bulletin.report_time - now > timedelta(seconds=EEW_FUTURE_TOLERANCE_S):
+                # Dated ahead of the clock (the same tolerance as the EEW and tsunami guards): not believed.
+                # Held as the newest it would make every real file after it "older", for good.
+                self._warn_future(name, bulletin)
+                self._missing[name] = now
+                continue
             if bulletin is None:
                 self._missing[name] = now  # 404, a drill / test file, or no row for the office
                 if text is not None:
@@ -686,6 +694,13 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
             if events:
                 self._save()
         return HeatAlertState(self._held[1] if self._held else None)
+
+    def _warn_future(self, name: tuple[date, int], bulletin: Any) -> None:
+        """Once per file name, like _log_unusable."""
+        if name not in self._warned:
+            self._warned.add(name)
+            _LOGGER.warning("heat alert: alert_%s_%02d.csv is dated %s, ahead of the clock: ignored",
+                            f"{name[0]:%Y%m%d}", name[1], bulletin.report_time.isoformat())
 
     def _log_unusable(self, name: tuple[date, int], text: str) -> None:
         """A 200 answer with no bulletin: a drill / test file is expected (debug); anything else may

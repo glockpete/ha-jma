@@ -33,7 +33,7 @@ def _slot(label: str) -> tuple[date, datetime]:
 def _value(cell: str) -> float | None:
     try:
         return int(cell.strip()) / 10
-    except ValueError:
+    except (ValueError, OverflowError):  # OverflowError: a digit string too long for a float
         return None
 
 

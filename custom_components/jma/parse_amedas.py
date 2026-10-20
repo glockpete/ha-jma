@@ -6,6 +6,7 @@ Each file holds one 3-hour JST block keyed by "YYYYMMDDHHMMSS"; each element is
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
@@ -90,13 +91,26 @@ def point_file_parts(latest: datetime) -> tuple[str, str]:
     return local.strftime("%Y%m%d"), f"{local.hour // 3 * 3:02d}"
 
 
+def _reading(value: Any) -> bool:
+    """A usable value: present and a finite number (JSON 1e400 parses to inf, and an int can be too big)."""
+    try:
+        return value is not None and math.isfinite(value)
+    except (TypeError, OverflowError):
+        return False
+
+
 def extreme_time(row_time: datetime, hm: Any) -> datetime | None:
     """A {hour, minute} UTC time-of-day inside the JST day of `row_time`, as a JST datetime."""
-    if not isinstance(hm, dict) or not isinstance(hm.get("hour"), int) or not isinstance(hm.get("minute"), int):
+    if not isinstance(hm, dict):
+        return None
+    hour, minute = hm.get("hour"), hm.get("minute")
+    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (hour, minute)):
+        return None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return None
     day_start = row_time.astimezone(JST).replace(hour=0, minute=0, second=0, microsecond=0)
     # The JST day starts at 15:00 UTC of the day before: hours 15-23 UTC fall in its first 9 h.
-    offset = timedelta(hours=(hm["hour"] + 9) % 24, minutes=hm["minute"])
+    offset = timedelta(hours=(hour + 9) % 24, minutes=minute)
     at = day_start + offset
     # The 00:00 row closes the previous day (24:00), so its extremes can lie "tomorrow" by this sum.
     return at - timedelta(days=1) if at > row_time else at
@@ -121,7 +135,7 @@ def parse_point(data: Any, station: str) -> Observation:
                 if field_name in values or element not in row:
                     continue
                 value, flag = row[element][0], row[element][1]
-                if flag == 0 and value is not None:
+                if flag == 0 and _reading(value):
                     values[field_name] = value
                     if newest is None or when > newest:
                         newest = when
@@ -129,7 +143,7 @@ def parse_point(data: Any, station: str) -> Observation:
                 if field_name in values or element not in row:
                     continue
                 value, flag = row[element][0], row[element][1]
-                if flag == 0 and value is not None:
+                if flag == 0 and _reading(value):
                     values[field_name] = value
                     values[f"{field_name}_time"] = extreme_time(when, row.get(time_element))
     except (KeyError, TypeError, ValueError, IndexError) as err:

@@ -32,6 +32,8 @@ _JST = timezone(timedelta(hours=9))
 _ZONE_SAMPLES = 50  # f = 0, 0.02 ... 1 on every leg between two storm-zone circles
 
 _AT_CENTRE = 1e-9  # a segment fraction this close to 0 or 1 is the centre itself
+# A circle wider than half the Earth's circumference would hold every place on it: no storm has one.
+_MAX_RADIUS_KM = math.pi * EARTH_RADIUS_KM
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -165,8 +167,41 @@ def parse_target_tc(data: Any) -> list[dict[str, Any]]:
 def _int(value: Any) -> int | None:
     try:
         return int(float(value))
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):  # OverflowError: inf, or an int too big for a float
         return None
+
+
+def _finite(value: Any) -> float:
+    """float(value) of a finite number. ValueError otherwise: JSON 1e400 parses to inf, and `nan`, a bool
+    or an int too big for a float are not measurements either."""
+    if isinstance(value, bool):
+        raise ValueError("not a number: a bool")
+    try:
+        number = float(value)
+    except OverflowError as err:
+        raise ValueError("number too big for a float") from err
+    if not math.isfinite(number):
+        raise ValueError(f"not finite: {number}")
+    return number
+
+
+def _position(lat: Any, lon: Any) -> tuple[float, float]:
+    """A latitude / longitude that is a place on Earth, else ValueError."""
+    lat, lon = _finite(lat), _finite(lon)
+    if abs(lat) > 90 or abs(lon) > 360:
+        raise ValueError(f"not a position: {lat}, {lon}")
+    return lat, lon
+
+
+def _circle_km(radius_m: Any) -> float | None:
+    """The 予報円 radius in km; None (unknown) when absent, negative, not finite or wider than the planet."""
+    if isinstance(radius_m, bool) or not isinstance(radius_m, int | float):
+        return None
+    try:
+        km = radius_m / 1000
+    except OverflowError:  # an int too big for a float
+        return None
+    return round(km, 1) if math.isfinite(km) and 0 <= km <= _MAX_RADIUS_KM else None
 
 
 def _parts(data: Any, what: str) -> tuple[dict, dict[int, dict]]:
@@ -202,8 +237,11 @@ def storm_zone_steps(fparts: dict[int, dict]) -> list[dict[str, Any]]:
             arcs = (part.get("stormWarningArea") or {}).get("arc") or []
             pairs = []
             for arc in arcs:
-                pair = (float(arc[0][0]), float(arc[0][1]), float(arc[1]))
-                pairs.append(pair)
+                lat, lon = _position(arc[0][0], arc[0][1])
+                radius = _finite(arc[1])
+                if not 0 < radius <= _MAX_RADIUS_KM * 1000:  # zero, negative or absurd: the zone is unknown
+                    raise ValueError(f"unusable storm-warning radius: {radius}")
+                pairs.append((lat, lon, radius))
         except (AttributeError, TypeError, IndexError, ValueError):
             continue
         new = [p for p in pairs if p not in seen]
@@ -261,7 +299,7 @@ def parse_storm(tc: dict[str, Any], forecast: Any, specs: Any, home: tuple[float
     stitle, sparts = _parts(specs, "specifications")
     try:
         now_f, now_s = fparts[0], sparts.get(0, {})
-        lat, lon = (float(v) for v in now_f["center"])
+        lat, lon = _position(*now_f["center"])
         wind = ((now_s.get("maximumWind") or {}).get("sustained") or {}).get("m/s")
         now = {
             "lat": lat, "lon": lon,
@@ -272,17 +310,17 @@ def parse_storm(tc: dict[str, Any], forecast: Any, specs: Any, home: tuple[float
         track = []
         for hours in sorted(h for h in fparts if h > 0):
             p = fparts[hours]
-            radius = (p.get("probabilityCircle") or {}).get("radius")
+            track_lat, track_lon = _position(p["center"][0], p["center"][1])
             track.append({
                 "hours": hours,
                 "time": (p.get("validtime") or {}).get("JST"),
-                "lat": float(p["center"][0]), "lon": float(p["center"][1]),
-                "circle_km": round(radius / 1000, 1) if isinstance(radius, int | float) else None,
+                "lat": track_lat, "lon": track_lon,
+                "circle_km": _circle_km((p.get("probabilityCircle") or {}).get("radius")),
             })
         past: list[list[float]] = []
         for key in ("preTyphoon", "typhoon"):
             for pt in (now_f.get("track") or {}).get(key) or []:
-                point = [float(pt[0]), float(pt[1])]
+                point = list(_position(pt[0], pt[1]))
                 if not past or past[-1] != point:  # the typhoon track starts where preTyphoon ends
                     past.append(point)
     except (KeyError, TypeError, IndexError, ValueError) as err:

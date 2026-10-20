@@ -321,7 +321,8 @@ async def test_coordinator_newest_404_falls_back_and_newest_is_retried(
     mock_heat_alert(aioclient_mock, {(20260721, 10): "alert_20261003_10.csv"})
     freezer.tick(timedelta(minutes=20))
     await co.async_refresh()
-    assert co.data.bulletin.report_time == _jst("2026-10-03T10:00:00") and len(fired) == 1  # quiet file
+    # mock_heat_alert serves the 3 October capture as the 21 July 10:00 file (ReportDate follows the URL)
+    assert co.data.bulletin.report_time == _jst("2026-07-21T10:00:00") and len(fired) == 1  # quiet file
 
 
 async def test_coordinator_at_most_two_requests_per_poll_and_recent_404s_are_skipped(

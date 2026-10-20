@@ -95,7 +95,7 @@ def parse_japan(data: Any, today: date) -> JapanForecast:
             continue
         try:
             city, report = _city(office, today)
-        except (JmaParseError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
+        except (JmaParseError, KeyError, IndexError, TypeError, ValueError, OverflowError, AttributeError) as err:
             _log_once(f"bad:{code}", "japan forecast: office %s skipped: %r", code, err)
             continue
         cities.append(city)

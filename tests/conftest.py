@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Generator
 from unittest.mock import AsyncMock, patch
 
@@ -158,10 +159,16 @@ def mock_typhoon_wbgt_and_layers(aioclient_mock: AiohttpClientMocker) -> None:
 def mock_heat_alert(aioclient_mock: AiohttpClientMocker, files: dict[tuple[int, int], str]) -> None:
     """Heat alert: serve a real capture for each (issue date YYYYMMDD, hour) the coordinator
     asks for at the frozen test time. NOW = 13:12 JST on 2026-09-26 (in season) asks for the 10:00 file
-    of that day first, EVENING (23:30 JST on the 27th) for the 17:00 file of that day."""
+    of that day first, EVENING (23:30 JST on the 27th) for the 17:00 file of that day.
+
+    The 3 October captures stand in for files of earlier issue days, so the served file's ReportDate follows
+    the issue date in its URL (the real feed never serves a file dated after the day it is asked for, and the
+    coordinator does not believe one); its target dates and figures stay the capture's own."""
     for (ymd, hour), name in files.items():
-        aioclient_mock.get(URL_HEAT_ALERT.format(year=str(ymd)[:4], ymd=ymd, hh=f"{hour:02d}"),
-                           content=load_bytes(name))
+        day = str(ymd)
+        content = re.sub(rb"(?m)^ReportDate,\d{4}/\d{2}/\d{2}", f"ReportDate,{day[:4]}/{day[4:6]}/{day[6:]}".encode(),
+                         load_bytes(name))
+        aioclient_mock.get(URL_HEAT_ALERT.format(year=day[:4], ymd=ymd, hh=f"{hour:02d}"), content=content)
 
 
 @pytest.fixture

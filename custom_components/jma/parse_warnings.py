@@ -214,6 +214,13 @@ def _utc(value: str) -> datetime:
         raise JmaParseError(f"bad time {value!r}") from err
 
 
+def _utc_or_none(value: Any) -> datetime | None:
+    try:
+        return _utc(value)
+    except JmaParseError:
+        return None
+
+
 def suspect_reason(prev_control: dict[str, str] | None, area: AreaWarnings) -> str | None:
     """Why this r8 file looks partial or older than the last one believed, else None.
 
@@ -227,12 +234,21 @@ def suspect_reason(prev_control: dict[str, str] | None, area: AreaWarnings) -> s
     missing = sorted(set(prev_control) - set(area.control_times))
     if missing:
         return f"records missing: {', '.join(missing)}"
-    older = sorted(
-        dtc for dtc, when in area.control_times.items()
-        if dtc in prev_control and _utc(when) < _utc(prev_control[dtc])
-    )
+    older: list[str] = []
+    unreadable: list[str] = []
+    for dtc, when in sorted(area.control_times.items()):
+        before = _utc_or_none(prev_control.get(dtc))
+        if before is None:
+            continue  # new to the file, or accepted earlier with an unreadable time: nothing to compare
+        now = _utc_or_none(when)
+        if now is None:
+            unreadable.append(dtc)
+        elif now < before:
+            older.append(dtc)
     if older:
         return f"older copy of: {', '.join(older)}"
+    if unreadable:
+        return f"unreadable control time of: {', '.join(unreadable)}"
     return None
 
 

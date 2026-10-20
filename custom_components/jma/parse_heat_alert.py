@@ -100,16 +100,19 @@ def file_status(text: str | None) -> str | None:
     """The file's own `Status` meta value (通常 / 訓練 / 試験), or None when there is none."""
     if not text:
         return None
-    for cells in csv.reader(io.StringIO(text.lstrip("﻿"))):
-        if cells and cells[0] == _HEADER_FIRST_CELL:
-            return None
-        if len(cells) > 1 and cells[0].strip() == "Status":
-            return cells[1].strip()
+    try:
+        for cells in csv.reader(io.StringIO(text.lstrip("﻿"))):
+            if cells and cells[0] == _HEADER_FIRST_CELL:
+                return None
+            if len(cells) > 1 and cells[0].strip() == "Status":
+                return cells[1].strip()
+    except csv.Error:  # not this file's layout (a field over the 128 KiB limit): there is no status
+        return None
     return None
 
 
 def parse_heat_alert(text: str | None, office: str, stations: tuple[str, ...] = ()) -> HeatAlertBulletin | None:
-    """The office's row, or None: empty text, another layout (HTML), no row for the office, a
+    """The office's row, or None: empty text, another layout (HTML, or text csv cannot read), no row for the office, a
     missing / garbled date, or a status other than 通常 (訓練 drill, 試験 test).
 
     Figures have a day, set by the issue HOUR: ReportTime 05:00 => TargetDate1, from column 10
@@ -122,17 +125,20 @@ def parse_heat_alert(text: str | None, office: str, stations: tuple[str, ...] = 
     meta: dict[str, str] = {}
     row: list[str] | None = None
     in_rows = False
-    for cells in csv.reader(io.StringIO(text.lstrip("﻿"))):
-        if not cells:
-            continue
-        if not in_rows:
-            if cells[0] == _HEADER_FIRST_CELL:
-                in_rows = True
-            elif len(cells) > 1:
-                meta.setdefault(cells[0].strip(), cells[1].strip())
-        elif len(cells) > _COL_FLAG2 and cells[_COL_CODE].strip() == office:
-            row = cells
-            break
+    try:
+        for cells in csv.reader(io.StringIO(text.lstrip("﻿"))):
+            if not cells:
+                continue
+            if not in_rows:
+                if cells[0] == _HEADER_FIRST_CELL:
+                    in_rows = True
+                elif len(cells) > 1:
+                    meta.setdefault(cells[0].strip(), cells[1].strip())
+            elif len(cells) > _COL_FLAG2 and cells[_COL_CODE].strip() == office:
+                row = cells
+                break
+    except csv.Error:  # another layout (an HTML page with an unclosed quote: a field over the 128 KiB limit)
+        return None
     if not in_rows or row is None or meta.get("Status") != HEAT_ALERT_STATUS_NORMAL:
         return None
     try:
