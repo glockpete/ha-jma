@@ -6,6 +6,7 @@ Each file holds one 3-hour JST block keyed by "YYYYMMDDHHMMSS"; each element is
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -66,6 +67,14 @@ class Observation:
         if self.wind_index in (None, 0):
             return None
         return (self.wind_index * 22.5) % 360
+
+
+def station_names_from_table(table: Any, station_ids: Iterable[str]) -> tuple[str | None, ...]:
+    """The kanji name (kjName) of each station id in amedastable.json, in the order given; None where the
+    table has no such station or no usable name. A table that is not an object raises AttributeError."""
+    return tuple(
+        name if isinstance(name := (table.get(sid) or {}).get("kjName"), str) and name else None
+        for sid in station_ids)
 
 
 def parse_latest_time(text: str) -> datetime:

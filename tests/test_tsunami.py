@@ -25,7 +25,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from custom_components.jma.const import (
     TSUNAMI_AREAS_MAX,
     TSUNAMI_BACKFILL_LIMIT,
-    TSUNAMI_HOME_AREA,
+    TSUNAMI_COAST_AREA,
     TSUNAMI_MAX_AGE,
     URL_P2P_HISTORY,
     URL_P2P_TSUNAMI,
@@ -45,7 +45,7 @@ from .helpers import clone, load_json
 
 JST = timezone(timedelta(hours=9))
 REAL_RUN = QuakeClient.run  # taken at import, before conftest's autouse fixture replaces it
-HOME = TSUNAMI_HOME_AREA["130000"]
+HOME = TSUNAMI_COAST_AREA["130010"]
 HISTORY = load_json("p2p_jma_tsunami_history.json")  # newest first
 GRADE = {"Watch": "watch", "Warning": "warning", "MajorWarning": "major_warning"}
 
@@ -514,7 +514,7 @@ async def test_backfill_survives_a_tsunami_endpoint_failure(freezer):
     freezer.move_to("2026-09-26T04:00:00+00:00")  # 13:00 JST
     api = _api(history=[_quake_msg("q1", "2026/09/26 12:58:00", 30)], tsunami=JmaFetchError("down"))
     qc, rec = _client(api=api)
-    await qc._backfill()
+    await _one_connection(qc)
     assert [t for t, _ in rec.events] == ["earthquake"]  # the quake replay was not lost
     assert qc.tsunami.replayed is False  # unknown, not "none", while the endpoint is down
     urls = [c.args[0] for c in api.get_json.await_args_list]
@@ -529,7 +529,7 @@ async def test_backfill_survives_a_history_failure(freezer):
     freezer.move_to(_just_after(msg).astimezone(UTC))
     api = _api(history=JmaFetchError("down"), tsunami=[msg])
     qc, rec = _client(api=api)
-    await qc._backfill()
+    await _one_connection(qc)
     assert [t for t, _ in rec.events] == ["tsunami"] and rec.events[0][1]["backfill"] is False
     assert qc.tsunami.replayed is True and rec.saves == 1 and rec.quakes >= 1
 
@@ -537,21 +537,26 @@ async def test_backfill_survives_a_history_failure(freezer):
 async def test_backfill_empty_tsunami_list_marks_replayed_and_refreshes_sensors(freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
     qc, rec = _client(api=_api(history=[], tsunami=[]))
-    await qc._backfill()
+    await qc._backfill_quakes()  # the units run() uses; run() itself would add its own connected/disconnected refreshes
+    assert await qc._replay_tsunami_list() is True
     assert rec.events == [] and qc.tsunami.replayed is True and rec.quakes == 1
 
 
 async def test_backfill_non_list_tsunami_answer_is_not_a_replay(freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
     qc, rec = _client(api=_api(history=[], tsunami={"error": "x"}))
-    await qc._backfill()
+    await _one_connection(qc)
     assert rec.events == [] and qc.tsunami.replayed is False  # a dict is not an answer
 
 
 async def test_backfill_both_endpoints_failing_raises_nothing(freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
     qc, rec = _client(api=_api(history=JmaFetchError("a"), tsunami=JmaFetchError("b")))
-    await qc._backfill()
+    await _one_connection(qc)
+    assert rec.events == [] and qc.tsunami.replayed is False
+    # run() would swallow an exception and reconnect, so also call the two real units: neither may raise.
+    await qc._backfill_quakes()
+    assert await qc._replay_tsunami_list() is False
     assert rec.events == [] and qc.tsunami.replayed is False
 
 
@@ -573,7 +578,8 @@ async def test_sensor_unknown_none_watch_warning(tokyo: HomeAssistant, aioclient
 
     api = entry.runtime_data.api
     api.get_json = AsyncMock(side_effect=_api(history=[], tsunami=[]).get_json.side_effect)
-    await qc._backfill()  # an empty list is still a successful replay
+    await qc._backfill_quakes()
+    assert await qc._replay_tsunami_list() is True  # an empty list is still a successful replay
     await hass.async_block_till_done()
     assert hass.states.get(SENSOR).state == "none"
 
@@ -785,9 +791,9 @@ def test_client_tsunami_tick_fires_saves_refreshes_and_never_raises():
     qc.handle(msg, issued + timedelta(minutes=1))
     saves, quakes = rec.saves, rec.quakes
     qc.tsunami_tick(issued + timedelta(hours=1))
-    assert len(rec.events) == 1 and rec.quakes == quakes + 1  # sensors rewritten on every tick
+    assert len(rec.events) == 1 and rec.quakes == quakes  # nothing changed: the sensors are not written
     qc.tsunami_tick(issued + TSUNAMI_MAX_AGE + timedelta(minutes=5))
-    assert [t for t, _ in rec.events] == ["tsunami", "tsunami_cancelled"]
+    assert [t for t, _ in rec.events] == ["tsunami", "tsunami_cancelled"] and rec.quakes == quakes + 1
     assert rec.events[1][1]["expired"] is True and "type" not in rec.events[1][1]
     assert rec.saves == saves + 1
     qc.tsunami.tick = lambda now: 1 / 0  # type: ignore[method-assign]
@@ -845,6 +851,44 @@ def _api_with_sockets(sockets: list, tsunami_answers: list, history=None):
     api = NS(session=NS(ws_connect=lambda *a, **k: pool.pop(0) if len(pool) > 1 else pool[0]),
              get_json=get_json)
     return api, calls
+
+
+async def _one_connection(qc) -> None:
+    """One connection of the REAL run(): a quiet fake socket, the history awaited, the tsunami list asked
+    beside it (its retry wait held), then the connection is cut. `qc._api` answers with its own get_json."""
+    qc._api.session = NS(ws_connect=lambda *a, **k: _FrameSocket([], asyncio.Event()))
+    gate = asyncio.Event()
+
+    async def hold(seconds: float) -> None:
+        await gate.wait()
+
+    qc._retry_sleep = hold
+    task = asyncio.ensure_future(REAL_RUN(qc))
+    await _yield_loop()
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_run_logs_a_frame_that_is_not_json_and_goes_on_with_the_next(freezer, caplog):
+    msg = _warning_bulletin()
+    freezer.move_to((parse_552(msg).issued + timedelta(minutes=1)).astimezone(UTC))
+    closed = asyncio.Event()
+    api, _ = _api_with_sockets([_FrameSocket(['{"code": 552, "trunc', json.dumps(msg)], closed)], [[]])
+    qc, rec = _client(api=api)
+    with caplog.at_level("DEBUG", logger="custom_components.jma.quake_ws"):
+        task = asyncio.ensure_future(REAL_RUN(qc))
+        await _yield_loop()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    assert any("not JSON" in r.getMessage() for r in caplog.records)
+    assert [t for t, _ in rec.events] == ["tsunami"]
+
+
+def test_the_test_only_backfill_is_gone():
+    """_backfill() was called by tests only; run() uses _backfill_quakes() and _tsunami_retry()."""
+    assert not hasattr(QuakeClient, "_backfill")
 
 
 async def test_run_retries_the_tsunami_list_every_minute_until_it_answers(freezer):
@@ -926,7 +970,7 @@ async def test_run_retry_survives_an_unexpected_error_without_touching_the_socke
 
 
 async def test_run_end_to_end_live_frame_then_reconnect_gives_one_event(freezer):
-    """The real run() with a fake websocket and the real _backfill: a Tokyo Bay Warning arrives as
+    """The real run() with a fake websocket and the real replays: a Tokyo Bay Warning arrives as
     a text frame, the socket drops, the reconnect's list already contains that bulletin: one event."""
     msg = _warning_bulletin()
     freezer.move_to((parse_552(msg).issued + timedelta(minutes=2)).astimezone(UTC))
@@ -985,7 +1029,7 @@ def _wire(hass, entry, aioclient_mock, msg):
 async def _replay(entry, get_json) -> None:
     qc = entry.runtime_data.quake
     qc._api = NS(get_json=AsyncMock(side_effect=get_json))
-    await qc._backfill()  # the two requests of a connection, one after the other
+    await _one_connection(qc)  # the two requests of a connection, as run() makes them
 
 
 async def test_restart_with_matching_memory_sends_nothing_and_empty_storage_sends_one(

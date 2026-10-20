@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from typing import Any
 
 import voluptuous as vol
@@ -157,7 +158,8 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
         return JmaOptionsFlow()
 
 
-STATION_ID = re.compile(r"\d{5}")
+# ASCII digits only: `\d` also matches full-width and Arabic-Indic digits, which 404 in the station URL.
+STATION_ID = re.compile(r"[0-9]{5}")
 
 
 class JmaOptionsFlow(OptionsFlow):
@@ -168,7 +170,8 @@ class JmaOptionsFlow(OptionsFlow):
             cleaned = dict(user_input)
             for key in (CONF_STATION_PRIMARY, CONF_STATION_SECONDARY):
                 # A typo used to 404 silently and quietly move every reading to the other station.
-                cleaned[key] = str(user_input.get(key, "")).strip()
+                # NFKC folds the full-width digits a Japanese input method types (４４１３２) to ASCII.
+                cleaned[key] = unicodedata.normalize("NFKC", str(user_input.get(key, "")).strip())
                 if not STATION_ID.fullmatch(cleaned[key]):
                     errors[key] = "invalid_station"
             if not errors:

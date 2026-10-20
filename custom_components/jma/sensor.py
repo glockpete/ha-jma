@@ -485,6 +485,10 @@ class TsunamiSensor(JmaEntity, SensorEntity):
         self.async_write_ha_state()
 
     @property
+    def available(self) -> bool:
+        return super().available and self.runtime.quake.enabled
+
+    @property
     def native_value(self) -> str | None:
         tracker = self.runtime.quake.tsunami
         picture = tracker.picture(dt_util.now())

@@ -228,11 +228,19 @@ def test_tracker_keeps_two_quakes_in_the_same_minute_apart():
     assert q is not None and q.hypocenter == "千葉県北西部" and q.pref_max_scale is None
 
 
-def test_tracker_remembers_ids_it_was_given():
+def test_tracker_remembers_ids_it_has_seen():
     first = _aug23()[0]
-    assert QuakeTracker(QUAKE_PLACE).feed(first) is not None  # positive control: a fresh tracker does not skip it
-    assert QuakeTracker(QUAKE_PLACE, seen=[str(first.get("id") or first.get("_id"))]).feed(first) is None
-    assert QuakeTracker(QUAKE_PLACE, seen=[str(i) for i in range(600)]).seen_ids[0] == "100"  # 500 cap
+    t = QuakeTracker(QUAKE_PLACE)
+    assert t.feed(first) is not None
+    assert t.feed(first) is None  # the same report again is skipped
+    assert QuakeTracker(QUAKE_PLACE).feed(first) is not None  # a fresh tracker does not skip it
+
+
+def test_tracker_remembers_at_most_500_ids():
+    t = QuakeTracker(QUAKE_PLACE)
+    for i in range(600):
+        t.feed(_synthetic_551(qid=str(i), hypo="東京湾"))
+    assert len(t._seen) == 500 and next(iter(t._seen)) == "100"
 
 
 NOW = datetime(2026, 9, 26, 12, 17, 30, tzinfo=JST)
@@ -297,8 +305,10 @@ def test_eew_live_replay_has_same_freshness_limit_as_backfill():
     assert EewTracker(QUAKE_PLACE.pref).feed(_eew(1, 45, 50), NOW + timedelta(days=1)) == []
     msg = _eew(1, 45, 50)
     del msg["issue"]["time"]
-    assert EewTracker(QUAKE_PLACE.pref).feed(msg, NOW) == []
-    assert EewTracker(QUAKE_PLACE.pref).feed(_eew(1, 45, 50), NOW - timedelta(minutes=5)) == []
+    assert EewTracker(QUAKE_PLACE.pref).feed(msg, NOW, backfill=True) == []  # live: see tests/test_eew_clock.py
+    # a slow host clock (message 5 min ahead) still alerts; the limit is EEW_FUTURE_TOLERANCE_S
+    assert EewTracker(QUAKE_PLACE.pref).feed(_eew(1, 45, 50), NOW - timedelta(minutes=5)) != []
+    assert EewTracker(QUAKE_PLACE.pref).feed(_eew(1, 45, 50), NOW - timedelta(minutes=15)) == []
 
 
 def test_eew_99_means_or_more():

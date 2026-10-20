@@ -267,6 +267,9 @@ PREFECTURES: Final[dict[str, str]] = {
 # part matches point addresses with it.
 CONF_AREA_NAME_JA: Final = "area_name_ja"
 EEW_BACKFILL_MAX_AGE_S: Final = 120
+# A warning issued further ahead of the host clock than this is dropped (with one WARNING per event id):
+# the clock is wrong. Within it a slow clock still alerts. Mirrors FUTURE_TOLERANCE of the tsunami tracker.
+EEW_FUTURE_TOLERANCE_S: Final = 600
 QUAKE_BACKFILL_MAX_AGE_S: Final = 600
 # P2P scale code -> JMA shindo label.
 SHINDO: Final[dict[int, str]] = {
@@ -358,9 +361,17 @@ KIKIKURU_FLOOD_PALETTE: Final[dict[tuple[int, int, int], int]] = {
 KIKIKURU_ELEMENTS: Final[dict[str, str]] = {"inund": "inund", "land": "land", "flood": "flood_mesh"}
 
 # ---- safety alerts ----
-# Tsunami (P2P 552). office -> the 津波予報区 whose grade is "home". Names as P2P writes them
-# (live history 2026-10-03: 東京湾内湾 appears in the 2025-07-30 bulletins).
-TSUNAMI_HOME_AREA: Final[dict[str, str]] = {"130000": "東京湾内湾"}
+# Tsunami (P2P 552). class10 code of the place (the area list's third level, which the config flow stores as
+# "class10") -> the 津波予報区 whose grade is "home". The office is too coarse: 130000 also holds the Izu and
+# Ogasawara islands. Names as P2P writes them (live history 2026-10-03: 東京湾内湾 in the 2025-07-30 bulletins,
+# 伊豆諸島 and 小笠原諸島 in the 2025-07-30 / 2025-07-31 / 2026-06-08 ones). 130010 東京地方 (the 23 wards and the
+# mainland), 130020 伊豆諸島北部 and 130030 伊豆諸島南部 (both 伊豆諸島), 130040 小笠原諸島. Other prefectures: no entry.
+TSUNAMI_COAST_AREA: Final[dict[str, str]] = {
+    "130010": "東京湾内湾",
+    "130020": "伊豆諸島",
+    "130030": "伊豆諸島",
+    "130040": "小笠原諸島",
+}
 # P2P grade -> rank. "Unknown" and anything else rank 0.
 TSUNAMI_GRADE_RANK: Final[dict[str, int]] = {"Watch": 1, "Warning": 2, "MajorWarning": 3}
 TSUNAMI_GRADE_KEY: Final[tuple[str, ...]] = ("none", "watch", "warning", "major_warning")

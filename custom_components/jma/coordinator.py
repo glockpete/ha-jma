@@ -73,6 +73,7 @@ from .parse_amedas import (
     parse_latest_time,
     parse_point,
     point_file_parts,
+    station_names_from_table,
 )
 from .parse_forecast import ForecastData, parse_forecast, parse_overview
 from .parse_heat_alert import (
@@ -608,9 +609,8 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
         """Names are optional: a failure or an odd shape is a debug line and the poll goes on."""
         try:
             table = await self.api.get_json(URL_AMEDAS_TABLE)
-            names = tuple(
-                name for sid in (self.cfg.station_primary, self.cfg.station_secondary)
-                if isinstance(name := (table.get(sid) or {}).get("kjName"), str) and name)
+            names = tuple(name for name in station_names_from_table(
+                table, (self.cfg.station_primary, self.cfg.station_secondary)) if name)
         except (JmaError, AttributeError, TypeError) as err:
             _LOGGER.debug("heat alert: no station names yet: %s", err)
             return

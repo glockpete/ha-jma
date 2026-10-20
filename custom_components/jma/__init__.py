@@ -29,7 +29,7 @@ from .const import (
     CONF_STATION_SECONDARY,
     DOMAIN,
     EVENT_TYPES,
-    TSUNAMI_HOME_AREA,
+    TSUNAMI_COAST_AREA,
     URL_AMEDAS_TABLE,
 )
 from .coordinator import (
@@ -53,6 +53,7 @@ from .coordinator import (
 )
 from .errors import JmaError
 from .memory import AlertMemory
+from .parse_amedas import station_names_from_table
 from .parse_quake import QuakePlace, prefecture_for_office
 from .quake_ws import QuakeClient
 
@@ -106,7 +107,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         warnings=WarningsCoordinator(hass, entry, api, cfg, fire),
         nowcast=NowcastCoordinator(hass, entry, api, cfg, fire),
         quake=QuakeClient(api, fire, on_quake, place, memory=memory.tsunami, save=memory.save,
-                          tsunami_area=TSUNAMI_HOME_AREA.get(cfg.office)),
+                          tsunami_area=TSUNAMI_COAST_AREA.get(cfg.class10)),
         # Optional data: no events, no pushes, not part of feed health. The typhoon and heat-alert
         # coordinators also raise events.
         timeline=WarningOutlookCoordinator(hass, entry, api, cfg),
@@ -122,10 +123,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         """Station names for the weather attributes; one table fetch per start, names are optional."""
         try:
             table = await api.get_json(URL_AMEDAS_TABLE)
-            runtime.extra["station_names"] = {
-                sid: (table.get(sid) or {}).get("kjName")
-                for sid in (cfg.station_primary, cfg.station_secondary)
-            }
+            ids = (cfg.station_primary, cfg.station_secondary)
+            runtime.extra["station_names"] = dict(zip(ids, station_names_from_table(table, ids), strict=True))
         except (JmaError, AttributeError) as err:
             _LOGGER.debug("amedastable unavailable, no station names: %s", err)
 
@@ -161,12 +160,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
     if runtime.quake.enabled:
         entry.async_create_background_task(hass, runtime.quake.run(), "jma p2p quake socket")
 
-    @callback
-    def tsunami_tick(_now: datetime) -> None:
-        """A tsunami bulletin that was never cancelled expires on the clock, not on the next message."""
-        runtime.quake.tsunami_tick(dt_util.now())
+        @callback
+        def tsunami_tick(_now: datetime) -> None:
+            """A tsunami bulletin that was never cancelled expires on the clock, not on the next message."""
+            runtime.quake.tsunami_tick(dt_util.now())
 
-    entry.async_on_unload(async_track_time_interval(hass, tsunami_tick, TSUNAMI_TICK))
+        # An entry without an earthquake connection has no tsunami bulletins to expire: no timer.
+        entry.async_on_unload(async_track_time_interval(hass, tsunami_tick, TSUNAMI_TICK))
 
     if runtime.debug_simulate:
         async def simulate(call: ServiceCall) -> None:

@@ -11,14 +11,17 @@ Addresses are compared as text (`in`), never as a pattern.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import logging
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .const import EEW_BACKFILL_MAX_AGE_S, PREFECTURES
+from .const import EEW_BACKFILL_MAX_AGE_S, EEW_FUTURE_TOLERANCE_S, PREFECTURES
 
 JST = timezone(timedelta(hours=9))
+_LOGGER = logging.getLogger(__name__)
+WARNED_MAX = 200  # event ids remembered as warned about (clock far behind)
 
 
 def prefecture_for_office(office: Any) -> str | None:
@@ -155,19 +158,15 @@ class QuakeTracker:
     """One running picture per quake (keyed by origin time): 震度速報 -> 震源 -> 各地の震度 are merged, and
     an event goes out when the prefecture or local scale rises or the epicentre first becomes known."""
 
-    def __init__(self, place: QuakePlace, seen: Iterable[str] = ()) -> None:
+    def __init__(self, place: QuakePlace) -> None:
         self.place = place
-        self._seen: dict[str, None] = dict.fromkeys(list(seen)[-MAX_REMEMBERED:])
+        self._seen: dict[str, None] = {}
         self._merged: dict[str, Quake] = {}
         # Why the last feed() returned a quake: "new" (first report of it), "scale" (the prefecture's
         # maximum rose) or "detail" (the prefecture's maximum is unchanged: only the local figure
         # and/or the epicentre arrived). An automation can alarm for the first two and only update a
         # notification for the third (one quake is three or more reports).
         self.last_change: str | None = None
-
-    @property
-    def seen_ids(self) -> list[str]:
-        return list(self._seen)
 
     def feed(self, msg: Any) -> Quake | None:
         quake = parse_551(msg, self.place)
@@ -227,6 +226,7 @@ class EewTracker:
         self.pref = pref
         self._alerted: dict[str, int] = {}
         self._cancelled: dict[str, datetime] = {}
+        self._warned_future: OrderedDict[str, None] = OrderedDict()  # event ids already warned about
 
     @staticmethod
     def _predicted(area: dict[str, Any]) -> int:
@@ -235,6 +235,32 @@ class EewTracker:
                   if s is not None and s not in (-1, 99)]
         return max(bounds) if bounds else 0
 
+    def _fresh_enough(self, event_id: str, issued: datetime | None, now: datetime, backfill: bool) -> bool:
+        """The age window. Reconnect replays can arrive on the live socket as well as backfill, so
+        both are held to EEW_BACKFILL_MAX_AGE_S. A live message with no usable issue time has an
+        unknown age and passes (the id dedupe stops a repeat); a replay without one cannot be aged.
+        A message further ahead of the clock than the tolerance means a wrong host clock: warned
+        about once per event id, and not remembered, so it alerts when the clock is right again."""
+        if issued is None:
+            if backfill:
+                _LOGGER.debug("EEW %s ignored: replayed without a readable issue time", event_id)
+            return not backfill
+        age = (now - issued).total_seconds()
+        if age < -EEW_FUTURE_TOLERANCE_S:
+            if event_id not in self._warned_future:
+                self._warned_future[event_id] = None
+                while len(self._warned_future) > WARNED_MAX:
+                    self._warned_future.popitem(last=False)
+                _LOGGER.warning(
+                    "EEW %s ignored: issued %s is more than %d min ahead of the clock (%s); "
+                    "the clock of this host looks wrong", event_id, issued.isoformat(),
+                    EEW_FUTURE_TOLERANCE_S // 60, now.isoformat())
+            return False
+        if age > EEW_BACKFILL_MAX_AGE_S:
+            _LOGGER.debug("EEW %s ignored: issued %d s ago", event_id, age)
+            return False
+        return True
+
     def feed(self, msg: Any, now: datetime, backfill: bool = False) -> list[dict[str, Any]]:
         if not isinstance(msg, dict) or msg.get("code") != 556 or msg.get("test") is True:
             return []
@@ -242,12 +268,13 @@ class EewTracker:
         event_id = str(issue.get("eventId") or "")
         if not event_id:
             return []
-        issued = parse_p2p_time(issue.get("time"))
-        # Reconnect replays can arrive on the live socket as well as backfill.
-        if issued is None or not -30 <= (now - issued).total_seconds() <= EEW_BACKFILL_MAX_AGE_S:
+        if not self._fresh_enough(event_id, parse_p2p_time(issue.get("time")), now, backfill):
             return []
+        # A cancelled id is remembered as long as a replay of its alert can still pass _fresh_enough: with a
+        # slow host clock that is the age limit plus the future tolerance, counted from when we saw the cancel.
+        keep_s = EEW_BACKFILL_MAX_AGE_S + EEW_FUTURE_TOLERANCE_S
         self._cancelled = {key: at for key, at in self._cancelled.items()
-                           if (now - at).total_seconds() <= EEW_BACKFILL_MAX_AGE_S}
+                           if (now - at).total_seconds() <= keep_s}
         if event_id in self._cancelled:
             return []
         quake = msg.get("earthquake") or {}

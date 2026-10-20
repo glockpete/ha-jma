@@ -28,7 +28,7 @@ from .const import (
 )
 from .errors import JmaError
 from .parse_quake import EewTracker, Quake, QuakePlace, QuakeTracker, parse_551
-from .parse_tsunami import TsunamiTracker
+from .parse_tsunami import TsunamiPicture, TsunamiTracker
 
 _LOGGER = logging.getLogger(__name__)
 # 552 is NOT here: /v2/history?codes=552 answers [] (live 2026-10-03); see URL_P2P_TSUNAMI.
@@ -67,6 +67,8 @@ class QuakeClient:
         self._save: Callable[[], None] = save or (lambda: None)
         self._tsunami_area = tsunami_area
         self.tsunami = TsunamiTracker(tsunami_area, self._tsunami_memory)
+        # what the sensors were last told about: the bulletin id (an attribute) and the picture (the state)
+        self._tsunami_shown: tuple[str | None, TsunamiPicture | None] = (None, None)
         self._quakes = QuakeTracker(place)
         self._eew = EewTracker(place.pref)
         self.enabled = True  # False when the connection limit of the service is used up by other entries
@@ -104,24 +106,40 @@ class QuakeClient:
                 event["predicted_shindo"] = SHINDO.get(event.get("predicted_scale") or 0)
                 self._fire(event_type, event)
         elif code == 552:
-            self._tsunami_events(self.tsunami.feed(msg, now, backfill=backfill))
+            self._tsunami_events(self.tsunami.feed(msg, now, backfill=backfill), now)
 
     def tsunami_tick(self, now: datetime) -> None:
-        """Called every few minutes: let the 48 h expiry act without waiting for a message."""
+        """Called every few minutes: let the 48 h expiry act without waiting for a message. The sensors are
+        written only when the tick fired an event or changed what they show (a bulletin that expired, or a held
+        future-dated one taken up)."""
+        if not self.enabled:
+            return
         try:
-            self._tsunami_events(self.tsunami.tick(now))
+            events = self.tsunami.tick(now)
+            if events or self._tsunami_view(now) != self._tsunami_shown:
+                self._tsunami_events(events, now)
+            else:
+                self._save_tsunami_memory()
         except Exception:  # noqa: BLE001 - the timer must never raise
             _LOGGER.warning("tsunami tick failed", exc_info=True)
 
-    def _tsunami_events(self, events: list[dict[str, Any]]) -> None:
+    def _tsunami_events(self, events: list[dict[str, Any]], now: datetime) -> None:
         """Fire what the tracker decided, persist its memory, refresh the sensors."""
         for event in events:
             event_type = event.pop("type")
             self._fire(event_type, event)
+        self._save_tsunami_memory()
+        self._tsunami_shown = self._tsunami_view(now)
+        self._on_quake()
+
+    def _tsunami_view(self, now: datetime) -> tuple[str | None, TsunamiPicture | None]:
+        current = self.tsunami.current
+        return (current.id if current else None, self.tsunami.picture(now))
+
+    def _save_tsunami_memory(self) -> None:
         if self.tsunami.dirty:
             self.tsunami.dirty = False
             self._save()
-        self._on_quake()
 
     def _safe_handle(self, msg: Any, now: datetime, backfill: bool) -> None:
         """One malformed message must never end the socket task."""
@@ -141,13 +159,6 @@ class QuakeClient:
             for msg in reversed(items if isinstance(items, list) else []):
                 self._safe_handle(msg, now, backfill=True)
 
-    async def _backfill(self) -> bool:
-        """Both replays one after the other; each fails on its own. Returns whether the tsunami list
-        answered (with a list) on THIS call. run() does NOT use this: there the list is asked beside
-        the socket loop (`_tsunami_retry`), so a slow list can never hold up a live EEW frame."""
-        await self._backfill_quakes()
-        return await self._replay_tsunami_list()
-
     async def _replay_tsunami_list(self) -> bool:
         """Ask for the tsunami list and replay it. Only a LIST answer counts (an empty one too);
         returns True for one."""
@@ -161,7 +172,8 @@ class QuakeClient:
             _LOGGER.debug("P2P tsunami list: not a list, ignored")
             return False
         try:
-            self._tsunami_events(self.tsunami.replay(bulletins, dt_util.now()))
+            now = dt_util.now()
+            self._tsunami_events(self.tsunami.replay(bulletins, now), now)
         except Exception:  # noqa: BLE001 - third-party payloads, any shape
             _LOGGER.warning("P2P tsunami replay skipped (unexpected shape)", exc_info=True)
         return True  # it was a list; asking again would return the same shape
@@ -205,6 +217,7 @@ class QuakeClient:
                                 try:
                                     payload = json.loads(msg.data)
                                 except ValueError:
+                                    _LOGGER.debug("P2P socket: frame is not JSON, dropped: %.80r", msg.data)
                                     continue
                                 self._safe_handle(payload, dt_util.now(), backfill=False)
                             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):

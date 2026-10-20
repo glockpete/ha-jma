@@ -134,7 +134,7 @@ municipality, for example `chiyoda`.
 | `sensor.jma_<place>_radar_frames` | Frame lists for rain radar map cards (the agency's file has no CORS header, so Home Assistant relays it). |
 | `sensor.jma_<place>_typhoon` | Number of active tropical cyclones (0 is a valid state). The `storms` attribute holds, for each storm, its position, pressure, wind, forecast and past track, the distance to the home location, the closest approach and the approach `stage` (`none`, `notice`, `urgent`). |
 | `sensor.jma_<place>_last_earthquake` | Origin time of the newest earthquake reported, with the intensity in the prefecture and at the municipality ([below](#earthquake-values)). |
-| `sensor.jma_<place>_tsunami` | Tsunami grade for your coast area: `none`, `watch`, `warning` or `major_warning`. The attributes carry the strongest grade anywhere in Japan, the areas under a warning, and for your coast area the expected height and arrival. Only offices listed under [Known limits](#known-limits) have a coast area. |
+| `sensor.jma_<place>_tsunami` | Tsunami grade for your coast area: `none`, `watch`, `warning` or `major_warning`. The attributes carry the strongest grade anywhere in Japan, the areas under a warning, and for your coast area the expected height and arrival. Only places listed under [Known limits](#known-limits) have a coast area. |
 | `sensor.jma_<place>_heat_alert` | Today's heat-stroke alert for the prefecture: `none`, `alert` (熱中症警戒アラート) or `special` (熱中症特別警戒アラート). The attributes say what is issued for tomorrow and carry the forecast WBGT figures of the prefecture's stations. Unavailable out of season. |
 | `sensor.jma_<place>_wbgt` | Today's highest forecast heat index (WBGT), degrees C. Only where the file name is known ([Known limits](#known-limits)); unavailable out of season. |
 | `sensor.jma_<place>_overview` | The agency's text overview for the office (Japanese). |
@@ -297,11 +297,12 @@ Where a service states no rate limit, none is stated here; the intervals above a
   danger.** It is a convenience for automations, not a warning system.
 - The earthquake service allows two connections per IP address, and each place keeps one open. At most two places
   per home can receive earthquake information; a third place opens no connection, logs one line saying so, and its
-  earthquake sensor stays unavailable.
+  earthquake and tsunami sensors stay unavailable.
 - The overview text and warning names are in Japanese. The interface text of the integration is in English and
   Japanese.
-- **Your tsunami coast area (津波予報区) is known only for the Tokyo office (`130000`, 東京湾内湾).** For every other
-  office `sensor.jma_<place>_tsunami` stays `none`; its `max_grade` attribute and the `tsunami` event still
+- **Your tsunami coast area (津波予報区) is known only for Tokyo prefecture, by municipality:** 東京湾内湾 (the 23
+  wards and the mainland), 伊豆諸島 (the Izu islands) and 小笠原諸島 (the Ogasawara islands). For every other
+  prefecture `sensor.jma_<place>_tsunami` stays `none`; its `max_grade` attribute and the `tsunami` event still
   report a warning or major warning anywhere in Japan, with the areas named.
 - **The heat index (WBGT) is created only for offices whose file name is known to the integration (Tokyo,
   `130000`).** For every other office the WBGT sensor is not created. The heat-stroke alert sensor works for every
@@ -340,8 +341,8 @@ the two P2P files of `tests/fixtures`:
 - **Feed-problem sensor.** `binary_sensor.jma_<place>_feed_problem` names the feed and the reason in its
   attributes.
 - **Log.** Add `custom_components.jma: debug` under `logger:` in `configuration.yaml` for the feed-by-feed detail.
-- **No heat-index sensor, tsunami sensor always `none`.** Expected outside the Tokyo office, see
-  [Known limits](#known-limits).
+- **No heat-index sensor, tsunami sensor always `none`.** Expected outside Tokyo (the heat index needs
+  the Tokyo office, the coast area needs a Tokyo municipality), see [Known limits](#known-limits).
 - **No earthquake values for a third place.** See [Known limits](#known-limits).
 
 ## Privacy
@@ -391,7 +392,7 @@ Acknowledgement: some of the rain-tile palette colours were taken from the publi
 - **設定**: 府県予報区、市区町村の順に選びます（観測所は自動で選ばれます）。
 - **できること**: 天気（実況・日別・1時間ごと）、警報レベルとイベント、雨の予測（5分ごとのナウキャスト）、キキクル、台風の
   接近通知、都道府県と市区町村の震度、緊急地震速報、津波情報、熱中症警戒アラート。
-- **制限**: 津波予報区は東京（東京湾内湾）、暑さ指数（WBGT）は東京でのみ使えます。ほかの地域では津波センサーは `none` の
+- **制限**: 津波予報区は東京都（東京湾内湾・伊豆諸島・小笠原諸島）、暑さ指数（WBGT）は東京でのみ使えます。ほかの地域では津波センサーは `none` の
   ままですが、全国の津波警報・大津波警報はイベントと `max_grade` 属性に出ます。
 - **地震・津波情報**は P2P地震情報 から受け取ります。**これだけを頼りに避難や安全の判断をしないでください。**
 - **出典**: 各サービスの利用規約に従って表示してください。Open-Meteo の無料 API は非営利目的に限られます。
