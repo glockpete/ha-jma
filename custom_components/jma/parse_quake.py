@@ -109,7 +109,7 @@ def _pos(value: Any) -> Any:
 def _scale(value: Any) -> int | None:
     """A P2P scale code as int. The spec says scales may carry a decimal point ('45.0', only the
     integer part counts), so floats are accepted; bools and anything else are not."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     return int(value)
 
@@ -159,6 +159,11 @@ class QuakeTracker:
         self.place = place
         self._seen: dict[str, None] = dict.fromkeys(list(seen)[-MAX_REMEMBERED:])
         self._merged: dict[str, Quake] = {}
+        # Why the last feed() returned a quake: "new" (first report of it), "scale" (the prefecture's
+        # maximum rose) or "detail" (the prefecture's maximum is unchanged: only the local figure
+        # and/or the epicentre arrived). An automation can alarm for the first two and only update a
+        # notification for the third (one quake is three or more reports).
+        self.last_change: str | None = None
 
     @property
     def seen_ids(self) -> list[str]:
@@ -190,12 +195,16 @@ class QuakeTracker:
         self._merged[key] = merged
         while len(self._merged) > 50:
             self._merged.pop(next(iter(self._merged)))
-        if (before is None
-                or (merged.pref_max_scale or 0) > (before.pref_max_scale or 0)
-                or (merged.local_scale or 0) > (before.local_scale or 0)
-                or (merged.hypocenter and not before.hypocenter)):
-            return merged
-        return None
+        if before is None:
+            self.last_change = "new"
+        elif (merged.pref_max_scale or 0) > (before.pref_max_scale or 0):
+            self.last_change = "scale"
+        elif ((merged.local_scale or 0) > (before.local_scale or 0)
+              or (merged.hypocenter and not before.hypocenter)):
+            self.last_change = "detail"
+        else:
+            return None
+        return merged
 
 
 def eew_area_matches(area: Any, prefecture: str | None) -> bool:
@@ -217,6 +226,7 @@ class EewTracker:
     def __init__(self, pref: str | None) -> None:
         self.pref = pref
         self._alerted: dict[str, int] = {}
+        self._cancelled: dict[str, datetime] = {}
 
     @staticmethod
     def _predicted(area: dict[str, Any]) -> int:
@@ -233,7 +243,12 @@ class EewTracker:
         if not event_id:
             return []
         issued = parse_p2p_time(issue.get("time"))
-        if backfill and (issued is None or (now - issued).total_seconds() > EEW_BACKFILL_MAX_AGE_S):
+        # Reconnect replays can arrive on the live socket as well as backfill.
+        if issued is None or not -30 <= (now - issued).total_seconds() <= EEW_BACKFILL_MAX_AGE_S:
+            return []
+        self._cancelled = {key: at for key, at in self._cancelled.items()
+                           if (now - at).total_seconds() <= EEW_BACKFILL_MAX_AGE_S}
+        if event_id in self._cancelled:
             return []
         quake = msg.get("earthquake") or {}
         hypo = quake.get("hypocenter") or {}
@@ -246,6 +261,7 @@ class EewTracker:
             "pref": self.pref,
         }
         if msg.get("cancelled") is True:
+            self._cancelled[event_id] = now
             if self._alerted.pop(event_id, None) is None:
                 return []
             return [{"type": "eew_cancelled", **base}]

@@ -1,4 +1,5 @@
 {
+  "title": "JMA Weather (Unofficial)",
   "config": {
     "step": {
       "user": {
@@ -33,6 +34,9 @@
           "debug_simulate": "Enable the jma.simulate test action"
         }
       }
+    },
+    "error": {
+      "invalid_station": "An AMeDAS station id is five digits, for example 44071."
     }
   },
   "entity": {
@@ -69,6 +73,23 @@
       },
       "japan": {
         "name": "Japan"
+      },
+      "tsunami": {
+        "name": "Tsunami",
+        "state": {
+          "none": "None",
+          "watch": "Advisory",
+          "warning": "Warning",
+          "major_warning": "Major warning"
+        }
+      },
+      "heat_alert": {
+        "name": "Heat alert",
+        "state": {
+          "none": "None",
+          "alert": "Alert",
+          "special": "Special alert"
+        }
       }
     },
     "binary_sensor": {
@@ -90,7 +111,12 @@
               "rain_arriving": "Rain arriving",
               "earthquake": "Earthquake",
               "eew": "Earthquake early warning",
-              "eew_cancelled": "Earthquake early warning cancelled"
+              "eew_cancelled": "Earthquake early warning cancelled",
+              "tsunami": "Tsunami warning or advisory",
+              "tsunami_cancelled": "Tsunami warnings cancelled",
+              "typhoon_approach": "Typhoon approaching",
+              "typhoon_cleared": "Typhoon passed",
+              "heat_alert": "Heat stroke alert"
             }
           }
         }

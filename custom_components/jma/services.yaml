@@ -14,6 +14,11 @@ simulate:
             - earthquake
             - eew
             - eew_cancelled
+            - tsunami
+            - tsunami_cancelled
+            - typhoon_approach
+            - typhoon_cleared
+            - heat_alert
     data:
       required: false
       selector:

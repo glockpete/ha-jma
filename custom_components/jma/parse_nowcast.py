@@ -106,7 +106,10 @@ class RainArming:
     """`rain_arriving` fires once per episode.
 
     Fires when rain (>= 1 mm/h) is forecast within 30 minutes while it is dry now. Re-arms
-    only after 60 minutes in which no frame of the series showed rain.
+    only after 60 minutes in which no frame of the series showed rain. A poll in which no frame
+    could be read at all (every band None) shows nothing: it is neither rain nor dry, so it ends
+    the dry stretch instead of adding to it (an hour of tile failures must not re-arm the
+    push in the middle of an episode).
     """
 
     def __init__(self, lead_minutes: int = 30, rearm: timedelta = RAIN_REARM) -> None:
@@ -117,7 +120,8 @@ class RainArming:
 
     def update(self, summary: RainSummary, now: datetime) -> bool:
         wet = any((s["band"] or 0) >= RAIN_BAND_RAIN for s in summary.series)
-        if wet:
+        unknown = all(s["band"] is None for s in summary.series)  # also true for an empty series
+        if wet or unknown:
             self._dry_since = None
         else:
             self._dry_since = self._dry_since or now

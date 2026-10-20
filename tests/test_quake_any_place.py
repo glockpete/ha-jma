@@ -388,7 +388,7 @@ async def test_renaming_the_entry_reloads_it(tokyo: HomeAssistant, aioclient_moc
     hass.config_entries.async_update_entry(entry, title="JMA Renamed")
     await hass.async_block_till_done()
     assert entry.runtime_data is not runtime
-    device = dr.async_get(hass).async_get_device(identifiers={("jma", AREA)})
+    device = dr.async_get(hass).async_get_device_by_identifier(("jma", AREA), entry.entry_id)
     assert device is not None and device.name == "JMA Renamed"
 
 

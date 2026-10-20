@@ -1,6 +1,6 @@
 {
   "domain": "jma",
-  "name": "JMA weather (気象庁)",
+  "name": "JMA Weather (Unofficial)",
   "codeowners": [
     "@glockpete"
   ],
@@ -14,5 +14,5 @@
     "custom_components.jma"
   ],
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.6.0"
 }

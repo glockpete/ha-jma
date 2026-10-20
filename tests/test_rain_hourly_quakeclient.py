@@ -113,8 +113,9 @@ def test_quake_client_routes_and_limits_replay():
                "earthquake": {"hypocenter": {"name": "東京湾"}},
                "areas": [{"name": "東京都２３区", "scaleFrom": 45, "scaleTo": 50}]}, now)
     assert rec.events[-1][0] == "eew" and rec.events[-1][1]["predicted_shindo"] == "5+"
-    qc.handle({"code": 552, "time": "x"}, now)
-    assert qc.last_tsunami is not None
+    qc.handle({"code": 552, "time": "x"}, now)  # no id / issue time: ignored, never raises
+    assert not hasattr(qc, "last_tsunami") and qc.tsunami.current is None
+    assert [t for t, _ in rec.events] == ["earthquake", "eew"]
 
 
 def test_quake_client_fires_no_earthquake_without_a_point_of_the_prefecture():
@@ -167,15 +168,33 @@ async def test_socket_opens_before_history_and_survives_odd_errors(hass, monkeyp
             raise RuntimeError("odd")  # not a network error
         return _WS(order)
 
-    client = QuakeClient(NS(session=NS(ws_connect=ws_connect)), lambda *a: None, lambda: None, QUAKE_PLACE)
+    async def get_json(url, params=None):  # the tsunami list, asked beside the socket loop
+        return []
+
+    client = QuakeClient(NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda *a: None, lambda: None,
+                         QUAKE_PLACE)
 
     async def backfill() -> None:
         order.append("history")
 
-    client._backfill = backfill
+    client._backfill_quakes = backfill
     task = asyncio.create_task(client.run())
     await asyncio.sleep(1.5)  # backoff 1 s after the odd error
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
     assert order[:2] == ["connect", "history"]
+
+
+def test_earthquake_events_say_what_changed_for_the_real_ibaraki_sequence():
+    """The real 2026-08-23 茨城県南部 M5.9 reports (p2p_551_sample_b.json) are ONE quake.
+    Each event carries `change`: the first report is "new", a higher prefecture maximum is "scale", and
+    the report that only adds the local figure and the epicentre is "detail" (an update of a
+    notification, not another alarm)."""
+    rec = _Rec()
+    qc = QuakeClient(api=None, fire=rec.fire, on_quake=rec.on_quake, place=QUAKE_PLACE)  # type: ignore[arg-type]
+    now = datetime(2026, 8, 23, 2, 10, tzinfo=JST)
+    for msg in sorted(load_json("p2p_551_sample_b.json"), key=lambda m: m["time"]):
+        qc.handle(msg, now, backfill=False)
+    quakes = [(d["change"], d["pref_shindo"], bool(d["hypocenter"])) for kind, d in rec.events if kind == "earthquake"]
+    assert quakes == [("new", "4", False), ("scale", "5-", False), ("detail", "5-", True)]

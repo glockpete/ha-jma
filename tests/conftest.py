@@ -20,6 +20,7 @@ from custom_components.jma.const import (
     URL_AMEDAS_TABLE,
     URL_AREA,
     URL_FORECAST,
+    URL_HEAT_ALERT,
     URL_HIMAWARI_TIMES,
     URL_JAPAN_FORECAST,
     URL_NOWC_TILE,
@@ -150,6 +151,17 @@ def mock_typhoon_wbgt_and_layers(aioclient_mock: AiohttpClientMocker) -> None:
         aioclient_mock.get(URL_RASRF_TILE.format(z=10, x=TILE_X, y=TILE_Y, **frame), content=rain)
     # nationwide city forecast
     aioclient_mock.get(URL_JAPAN_FORECAST, json=load_json("forecast_010000.json"))
+    mock_heat_alert(aioclient_mock, {(20260926, 10): "alert_20261003_10.csv",
+                                     (20260927, 17): "alert_20261003_17.csv"})
+
+
+def mock_heat_alert(aioclient_mock: AiohttpClientMocker, files: dict[tuple[int, int], str]) -> None:
+    """Heat alert: serve a real capture for each (issue date YYYYMMDD, hour) the coordinator
+    asks for at the frozen test time. NOW = 13:12 JST on 2026-09-26 (in season) asks for the 10:00 file
+    of that day first, EVENING (23:30 JST on the 27th) for the 17:00 file of that day."""
+    for (ymd, hour), name in files.items():
+        aioclient_mock.get(URL_HEAT_ALERT.format(year=str(ymd)[:4], ymd=ymd, hh=f"{hour:02d}"),
+                           content=load_bytes(name))
 
 
 @pytest.fixture

@@ -73,7 +73,7 @@ async def test_every_entity_that_shows_agency_data_carries_the_credit(tokyo: Hom
     mock_jma(aioclient_mock)
     await setup(tokyo, entry)
     states = [s for s in tokyo.states.async_all() if s.entity_id.split(".")[0] in ("weather", "sensor", "event")]
-    assert len(states) == 13
+    assert len(states) == 15
     for state in states:
         credit = state.attributes.get("attribution", "")
         assert "気象庁" in credit or "Ministry of the Environment" in credit, state.entity_id

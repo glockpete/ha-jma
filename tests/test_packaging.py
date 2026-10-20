@@ -27,7 +27,7 @@ def _load(path: Path):
 def test_english_and_japanese_translations_have_the_same_keys():
     en = set(_keys(_load(COMPONENT / "translations" / "en.json")))
     ja = set(_keys(_load(COMPONENT / "translations" / "ja.json")))
-    assert en == ja and len(en) == 40
+    assert en == ja and len(en) == 56  # the interface texts and the title
 
 
 def test_translation_placeholders_match():
@@ -45,13 +45,12 @@ def test_strings_json_is_not_shipped():
 def test_manifest():
     manifest = _load(COMPONENT / "manifest.json")
     assert manifest["requirements"] == []  # Home Assistant itself requires Pillow
-    assert manifest["version"] == "0.1.0" == VERSION
+    assert manifest["version"] == "0.6.0" == VERSION
     for key in ("domain", "documentation", "issue_tracker", "codeowners", "name", "version"):
         assert manifest[key], key
 
 
-def test_manifest_links_use_the_owner_placeholder_or_one_account_name():
-    # `scripts/set_owner.sh <name>` replaces OWNER; either form must keep the shape of a GitHub address.
+def test_manifest_links_have_the_shape_of_a_github_address():
     manifest = _load(COMPONENT / "manifest.json")
     name = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?"
     assert re.fullmatch(rf"https://github\.com/{name}/ha-jma", manifest["documentation"])
@@ -63,6 +62,15 @@ def test_user_agent_names_the_product_and_version_only():
     assert USER_AGENT == f"ha-jma/{VERSION}"
 
 
-def test_hacs_json_holds_name_and_minimum_version_only():
+def test_hacs_json_holds_name_country_and_minimum_version_only():
     hacs = _load(ROOT / "hacs.json")
-    assert set(hacs) == {"name", "homeassistant"}
+    assert set(hacs) == {"name", "country", "homeassistant"}
+    assert hacs["country"] == "JP"  # HACS asks for it when a repository serves one country
+
+
+def test_the_name_says_it_is_unofficial_in_every_place_a_user_sees_it():
+    manifest = _load(COMPONENT / "manifest.json")
+    hacs = _load(ROOT / "hacs.json")
+    assert manifest["name"] == hacs["name"] == "JMA Weather (Unofficial)"
+    assert _load(COMPONENT / "translations" / "en.json")["title"] == manifest["name"]
+    assert "非公式" in _load(COMPONENT / "translations" / "ja.json")["title"]

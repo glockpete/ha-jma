@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions about using the integration
+    url: https://github.com/glockpete/ha-jma/discussions
+    about: Ask here when nothing is broken, for example how to build an automation.

@@ -12,8 +12,9 @@ from homeassistant.const import (
     UnitOfSpeed,
     UnitOfTemperature,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .const import ATTRIBUTION
@@ -51,10 +52,20 @@ class JmaWeather(JmaEntity, WeatherEntity):
             self.async_on_remove(coordinator.async_add_listener(self._write))
         self.async_on_remove(rt.forecast.async_add_listener(self._daily_changed))
         self.async_on_remove(rt.hourly.async_add_listener(self._hourly_changed))
+        # day/night (clear-night vs sunny, the night icon) follows sun.sun at the moment it crosses the
+        # horizon, not at the next coordinator update
+        self.async_on_remove(async_track_state_change_event(self.hass, ["sun.sun"], self._sun_changed))
 
     @callback
     def _write(self) -> None:
         self.async_write_ha_state()
+
+    @callback
+    def _sun_changed(self, event: Event[EventStateChangedData]) -> None:
+        old, new = event.data["old_state"], event.data["new_state"]
+        # sun.sun rewrites its elevation/azimuth all day: only a horizon crossing changes this entity
+        if (old.state if old else None) != (new.state if new else None):
+            self.async_write_ha_state()
 
     @callback
     def _daily_changed(self) -> None:

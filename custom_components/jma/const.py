@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "jma"
-VERSION: Final = "0.1.0"
+VERSION: Final = "0.6.0"
 # Names the product and its version only; some services reject the default Python user agent.
 USER_AGENT: Final = f"ha-jma/{VERSION}"
 # Credit wording as each service's terms ask for it. JMA: 「出典：気象庁ホームページ　（当該ページのURL）」 and, for
@@ -51,6 +51,9 @@ URL_WARNING_PAGE: Final = BOSAI + "/warning/#area_type=class20s&area_code={area}
 URL_OPEN_METEO: Final = "https://api.open-meteo.com/v1/jma"
 URL_P2P_WS: Final = "wss://api.p2pquake.net/v2/ws"
 URL_P2P_HISTORY: Final = "https://api.p2pquake.net/v2/history"
+# Note: /v2/history?codes=552 answers [] (live check 2026-10-03): tsunami bulletins are replayed from
+# their own endpoint (72 messages back to 2016 on that day).
+URL_P2P_TSUNAMI: Final = "https://api.p2pquake.net/v2/jma/tsunami"
 
 # ---- warning timeline, typhoon, heat index and map layers (optional feeds) ----
 # 3-hourly warning-risk outlook per class20 area (the JMA "timeline" page).
@@ -69,6 +72,9 @@ WBGT_ATTRIBUTION: Final = (
     "· Created by editing the Heat Illness Prevention Information website (Ministry of the Environment) "
     "(https://www.wbgt.env.go.jp/)"
 )
+# 環境省 熱中症警戒アラート / 熱中症特別警戒アラート, one CSV per issue (05, 10, 14, 17 JST), named for the
+# issue date (manual R08_wbgt_data_service_manual.pdf p.2; fetched live 2026-10-03). UTF-8, LF.
+URL_HEAT_ALERT: Final = "https://www.wbgt.env.go.jp/alert/dl/{year}/alert_{ymd}_{hh}.csv"
 # Frame lists for map layers (targetTimes send no CORS header, so a browser cannot read them; HA relays them).
 URL_RISK_TIMES: Final = f"{BOSAI}/jmatile/data/risk/targetTimes.json"
 URL_RASRF_TIMES: Final = f"{BOSAI}/jmatile/data/rasrf/targetTimes.json"
@@ -143,6 +149,7 @@ INTERVAL_TYPHOON: Final = timedelta(minutes=30)
 INTERVAL_WBGT: Final = timedelta(minutes=60)  # the CSV has 3-hourly steps, issued a few times a day
 INTERVAL_LAYERS: Final = timedelta(minutes=5)
 INTERVAL_JAPAN: Final = timedelta(minutes=30)
+INTERVAL_HEAT_ALERT: Final = timedelta(minutes=20)  # a new file at most four times a day
 # Data older than this multiple of its interval makes the entities unavailable.
 STALE_FACTOR: Final = 3
 
@@ -170,6 +177,12 @@ EVENT_TYPES: Final = (
     "earthquake",
     "eew",
     "eew_cancelled",
+    # safety alerts
+    "tsunami",
+    "tsunami_cancelled",
+    "typhoon_approach",
+    "typhoon_cleared",
+    "heat_alert",
 )
 
 # r8 weather-warning code -> (phenomenon, level). Transcribed from the JMA warning page JS.
@@ -343,3 +356,37 @@ KIKIKURU_FLOOD_PALETTE: Final[dict[tuple[int, int, int], int]] = {
     (60, 255, 255): 1,  # #3cffff
 }
 KIKIKURU_ELEMENTS: Final[dict[str, str]] = {"inund": "inund", "land": "land", "flood": "flood_mesh"}
+
+# ---- safety alerts ----
+# Tsunami (P2P 552). office -> the 津波予報区 whose grade is "home". Names as P2P writes them
+# (live history 2026-10-03: 東京湾内湾 appears in the 2025-07-30 bulletins).
+TSUNAMI_HOME_AREA: Final[dict[str, str]] = {"130000": "東京湾内湾"}
+# P2P grade -> rank. "Unknown" and anything else rank 0.
+TSUNAMI_GRADE_RANK: Final[dict[str, int]] = {"Watch": 1, "Warning": 2, "MajorWarning": 3}
+TSUNAMI_GRADE_KEY: Final[tuple[str, ...]] = ("none", "watch", "warning", "major_warning")
+TSUNAMI_GRADE_JA: Final[dict[str, str]] = {
+    "watch": "津波注意報", "warning": "津波警報", "major_warning": "大津波警報",
+}
+# A bulletin that was never cancelled stops counting as in force after this long (the longest
+# real episode in P2P's history, 2025-07-30 -> 07-31, ran about 32 h).
+TSUNAMI_MAX_AGE: Final = timedelta(hours=48)
+TSUNAMI_BACKFILL_LIMIT: Final = 10
+TSUNAMI_AREAS_MAX: Final = 12  # names per grade carried in events / attributes
+TSUNAMI_LIVE_MAX_AGE_S: Final = 600  # a replayed bulletin newer than this counts as live
+
+# Typhoon approach. Stage "notice": the track passes within NOTICE_KM inside NOTICE_HOURS, or home
+# is inside the 暴風警戒域 inside NOTICE_HOURS. Stage "urgent": home inside the 暴風域 / 暴風警戒域
+# inside URGENT_HOURS. A storm is "cleared" after CLEAR_POLLS polls in a row at stage none.
+TYPHOON_NOTICE_KM: Final = 300
+TYPHOON_NOTICE_HOURS: Final = 72
+TYPHOON_URGENT_HOURS: Final = 24
+TYPHOON_CLEAR_POLLS: Final = 3
+TYPHOON_STAGE_RANK: Final[dict[str, int]] = {"none": 0, "notice": 1, "urgent": 2}
+
+# Heat alert CSV flags (FlagExplanation line of every file):
+# 0 発表無し · 1 熱中症警戒情報発表 · 2 熱中症特別警戒情報判定 · 3 熱中症特別警戒情報発表 · 9 発表時間外
+HEAT_ALERT_HOURS: Final[tuple[int, ...]] = (5, 10, 14, 17)
+HEAT_ALERT_PUBLISH_LAG: Final = timedelta(minutes=6)  # Last-Modified is ~5 min after the hour
+HEAT_ALERT_STATUS_NORMAL: Final = "通常"  # 訓練 (drill) and 試験 (test) files never alert
+HEAT_ALERT_GRADE: Final[dict[str, str]] = {"1": "alert", "3": "special"}
+HEAT_ALERT_MEMORY_MAX: Final = 40

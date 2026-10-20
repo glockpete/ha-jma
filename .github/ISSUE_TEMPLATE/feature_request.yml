@@ -1,0 +1,16 @@
+name: Feature request
+description: Something the integration should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like to do?
+      description: Describe the automation or card you want, not only the data.
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: Where does the data come from?
+      description: "A link to the agency's page or file that has it, if you know one."

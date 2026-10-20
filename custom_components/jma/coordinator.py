@@ -11,7 +11,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from homeassistant.config_entries import ConfigEntry
@@ -25,6 +25,7 @@ from .const import (
     IN_FORCE_AT_START_MIN_LEVEL,
     INTERVAL_AMEDAS,
     INTERVAL_FORECAST,
+    INTERVAL_HEAT_ALERT,
     INTERVAL_HOURLY,
     INTERVAL_JAPAN,
     INTERVAL_LAYERS,
@@ -41,7 +42,9 @@ from .const import (
     STALE_FACTOR,
     URL_AMEDAS_LATEST,
     URL_AMEDAS_POINT,
+    URL_AMEDAS_TABLE,
     URL_FORECAST,
+    URL_HEAT_ALERT,
     URL_HIMAWARI_TIMES,
     URL_JAPAN_FORECAST,
     URL_NOWC_TILE,
@@ -63,6 +66,7 @@ from .const import (
     WBGT_PREF,
 )
 from .errors import JmaError, JmaFetchError, JmaParseError
+from .memory import AlertMemory
 from .parse_amedas import (
     Observation,
     merge_observations,
@@ -71,6 +75,15 @@ from .parse_amedas import (
     point_file_parts,
 )
 from .parse_forecast import ForecastData, parse_forecast, parse_overview
+from .parse_heat_alert import (
+    HEAT_ALERT_NON_ALERT_STATUSES,
+    expected_files,
+    file_status,
+    in_season,
+    new_alerts,
+    parse_heat_alert,
+    with_home,
+)
 from .parse_hourly import open_meteo_params, parse_hourly
 from .parse_japan import JapanForecast, parse_japan
 from .parse_layers import (
@@ -96,7 +109,7 @@ from .parse_nowcast import (
     tile_for,
 )
 from .parse_timeline import WarningOutlook, parse_timeline
-from .parse_typhoon import fit_storms, parse_storm, parse_target_tc
+from .parse_typhoon import ApproachTracker, approach_stage, fit_storms, parse_storm, parse_target_tc
 from .parse_warnings import (
     AreaWarnings,
     WarningChange,
@@ -180,6 +193,33 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
         self.last_ok = dt_util.utcnow()
         self.last_error = None
         return data
+
+
+class AlertEmitter:
+    """Events a coordinator produces before the event entity listens are held, then sent.
+
+    The first poll runs during setup, before the platforms exist: anything it finds waits in
+    `_pending` until set_alerts_ready() (called from async_setup_entry once they are set up).
+    """
+
+    _fire: Callable[[str, dict], None]
+
+    def _init_emitter(self, fire: Callable[[str, dict], None]) -> None:
+        self._fire = fire
+        self._alerts_ready = False
+        self._pending: list[tuple[str, dict]] = []
+
+    def set_alerts_ready(self) -> None:
+        self._alerts_ready = True
+        pending, self._pending = self._pending, []
+        for event_type, data in pending:
+            self._fire(event_type, data)
+
+    def _emit(self, event_type: str, data: dict) -> None:
+        if self._alerts_ready:
+            self._fire(event_type, data)
+        else:
+            self._pending.append((event_type, data))
 
 
 # ---------- forecast ----------
@@ -267,17 +307,13 @@ class WarningsState:
     xml_ok: datetime | None
 
 
-class WarningsCoordinator(_JmaCoordinator[WarningsState]):
+class WarningsCoordinator(AlertEmitter, _JmaCoordinator[WarningsState]):
     def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None]) -> None:
         super().__init__(hass, entry, api, cfg, "warnings", INTERVAL_WARNINGS)
-        self._fire = fire
+        self._init_emitter(fire)
         self._prev: list | None = None
         self._prev_control: dict[str, str] | None = None
         self._suspect_polls = 0
-        # The first poll runs during setup, before the event entity listens: its events wait here
-        # until set_alerts_ready() (called once the platforms are set up).
-        self._alerts_ready = False
-        self._pending: list[tuple[str, dict]] = []
         self._stale: list[str] = []
         self._xml_at: datetime | None = None
         self.xml_ok: datetime | None = None
@@ -295,18 +331,6 @@ class WarningsCoordinator(_JmaCoordinator[WarningsState]):
             self.xml_error = None
         except JmaError as err:
             self.xml_error = str(err)
-
-    def set_alerts_ready(self) -> None:
-        self._alerts_ready = True
-        pending, self._pending = self._pending, []
-        for event_type, data in pending:
-            self._fire(event_type, data)
-
-    def _emit(self, event_type: str, data: dict) -> None:
-        if self._alerts_ready:
-            self._fire(event_type, data)
-        else:
-            self._pending.append((event_type, data))
 
     def _hold_if_suspect(self, area: AreaWarnings) -> None:
         """A partial or older file would be diffed into 'cleared' then 'issued' again (a second
@@ -437,12 +461,23 @@ class TyphoonState:
     storms: list[dict[str, Any]]
 
 
-class TyphoonCoordinator(_JmaCoordinator[TyphoonState]):
-    """Active tropical cyclones. No storm = count 0, still a good poll."""
+class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
+    """Active tropical cyclones. No storm = count 0, still a good poll.
 
-    def __init__(self, hass, entry, api, cfg) -> None:
+    typhoon_approach / typhoon_cleared events; `memory` is the "typhoon"
+    section of AlertMemory ({storm id: {"stage", "quiet", "last_issue", "absent", "number",
+    "name_en", "name_ja"}}), `save` persists it.
+    """
+
+    def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None] | None = None,
+                 memory: dict[str, Any] | None = None, save: Callable[[], None] | None = None) -> None:
         super().__init__(hass, entry, api, cfg, "typhoon", INTERVAL_TYPHOON)
+        self._init_emitter(fire or (lambda _type, _data: None))
+        self._memory: dict[str, Any] = memory if memory is not None else {}
+        self._save: Callable[[], None] = save or (lambda: None)
         self._storms: dict[str, tuple[dict[str, Any], datetime]] = {}
+        self._tracker = ApproachTracker(self._memory)
+        self._fresh: set[str] = set()  # storms parsed in the current poll (not kept from last-good)
 
     async def _storm(self, tc: dict[str, Any], now: datetime) -> dict[str, Any]:
         """One storm; a failed fetch keeps that storm's last good entry while it is fresh."""
@@ -452,23 +487,39 @@ class TyphoonCoordinator(_JmaCoordinator[TyphoonState]):
                 self.api.get_json(URL_TYPHOON_SPECS.format(tc=tc["id"])),
             )
             storm = parse_storm(tc, forecast, specs, (self.cfg.latitude, self.cfg.longitude))
-        except (JmaError, AttributeError) as err:  # AttributeError: a field changed its type
+        except (JmaError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
+            # One storm's surprise (a bad shape, a failed file) must not mute the others:
+            # keep its last good entry while fresh, else list it bare.
             prev = self._storms.get(tc["id"])
-            if prev is None:
-                # First sighting and its files fail (often just not published yet): list it
-                # bare and still count it, instead of failing every other storm's poll.
-                _LOGGER.debug("typhoon %s: listed without details: %s", tc["id"], err)
-                return {
-                    "id": tc["id"], "number": tc.get("number"), "category": tc.get("category"),
-                    "issue": tc.get("issue"), "now": None, "track": [], "past_track": [],
-                    "distance_km": None, "closest": None, "incomplete": True,
-                }
-            if now - prev[1] >= INTERVAL_TYPHOON * STALE_FACTOR:
-                raise
-            _LOGGER.debug("typhoon %s: keeping last good: %s", tc["id"], err)
-            return prev[0]
+            if prev is not None and now - prev[1] < INTERVAL_TYPHOON * STALE_FACTOR:
+                _LOGGER.debug("typhoon %s: keeping last good: %s", tc["id"], err, exc_info=True)
+                return prev[0]
+            if isinstance(err, JmaError):
+                _LOGGER.debug("typhoon %s: listed without details: %s", tc["id"], err, exc_info=True)
+            else:
+                _LOGGER.warning("typhoon %s: unexpected payload, listed without details: %r",
+                                tc["id"], err, exc_info=True)
+            return {
+                "id": tc["id"], "number": tc.get("number"), "category": tc.get("category"),
+                "issue": tc.get("issue"), "now": None, "track": [], "past_track": [],
+                "distance_km": None, "closest": None, "incomplete": True,
+            }
         self._storms[tc["id"]] = (storm, now)
+        self._fresh.add(tc["id"])
         return storm
+
+    def _approach(self, storms: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+        """Set each complete storm's `stage`, tell the tracker (only about storms parsed in THIS
+        poll: a storm kept from last-good goes in with stage None and is not a quiet poll), send
+        the events and save the memory when it changed. Returns the storms with their stage."""
+        staged = [s if s.get("incomplete") else {**s, "stage": approach_stage(s, now)} for s in storms]
+        for event_type, data in self._tracker.update(
+                [s if s["id"] in self._fresh else {**s, "stage": None} for s in staged], now):
+            self._emit(event_type, data)
+        if self._tracker.dirty:
+            self._tracker.dirty = False
+            self._save()
+        return staged
 
     async def _fetch(self) -> TyphoonState:
         now = dt_util.utcnow()
@@ -476,16 +527,19 @@ class TyphoonCoordinator(_JmaCoordinator[TyphoonState]):
         if body is None:
             # No storm known yet: if JMA drops the file (404) when no storm is active, that is "none".
             self._storms = {}
+            self._fresh = set()
+            self._approach([], now)  # a storm that was in memory has gone from the list
             return TyphoonState(0, [])
         try:
             listed = json.loads(body)
         except ValueError as err:
             raise JmaParseError(f"typhoon targetTc: not JSON ({body[:60]!r})") from err
         tcs = parse_target_tc(listed)
+        self._fresh = set()
         storms = list(await asyncio.gather(*(self._storm(tc, now) for tc in tcs)))
-        active = {tc["id"] for tc in tcs}
-        self._storms = {k: v for k, v in self._storms.items() if k in active}
-        return TyphoonState(len(tcs), fit_storms(storms))
+        live = {tc["id"] for tc in tcs}
+        self._storms = {k: v for k, v in self._storms.items() if k in live}
+        return TyphoonState(len(tcs), fit_storms(self._approach(storms, now)))
 
 
 @dataclass(frozen=True)
@@ -518,6 +572,106 @@ class WbgtCoordinator(_JmaCoordinator[WbgtState]):
             _LOGGER.debug("wbgt: no usable row for %s / %s",
                           self.cfg.station_primary, self.cfg.station_secondary)
         return WbgtState(forecast)
+
+
+@dataclass(frozen=True)
+class HeatAlertState:
+    """bulletin: the newest parsed file (parse_heat_alert.HeatAlertBulletin) or None: out of
+    season, not published yet, a drill/test file, or the office has no row."""
+
+    bulletin: Any | None
+
+
+class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
+    """環境省 熱中症警戒アラート / 特別警戒アラート for the office's prefecture row.
+
+    Optional data: "no file" is a quiet, successful poll and it is not part of feed health.
+    `memory` is the "heat" list of AlertMemory (keys already announced), `save` persists it.
+    """
+
+    MAX_REQUESTS = 2  # files requested per poll (the newest, then one fallback)
+
+    def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None] | None = None,
+                 memory: list[str] | None = None, save: Callable[[], None] | None = None) -> None:
+        super().__init__(hass, entry, api, cfg, "heat alert", INTERVAL_HEAT_ALERT)
+        self._init_emitter(fire or (lambda _type, _data: None))
+        self._memory: list[str] = memory if memory is not None else []
+        self._save: Callable[[], None] = save or (lambda: None)
+        self._held: tuple[tuple[date, int], Any] | None = None  # (issue date, hour), bulletin
+        self._missing: dict[tuple[date, int], datetime] = {}  # name -> when it answered 404 / unusable
+        self._warned: set[tuple[date, int]] = set()  # unusable files already logged at WARNING
+        # AMeDAS station NAMES (primary, secondary) as the CSV writes them. __init__ sets it after
+        # the first table fetch; while it is empty _fetch asks amedastable.json again (R2-7).
+        self.station_names: tuple[str, ...] = ()
+
+    async def _load_station_names(self) -> None:
+        """Names are optional: a failure or an odd shape is a debug line and the poll goes on."""
+        try:
+            table = await self.api.get_json(URL_AMEDAS_TABLE)
+            names = tuple(
+                name for sid in (self.cfg.station_primary, self.cfg.station_secondary)
+                if isinstance(name := (table.get(sid) or {}).get("kjName"), str) and name)
+        except (JmaError, AttributeError, TypeError) as err:
+            _LOGGER.debug("heat alert: no station names yet: %s", err)
+            return
+        self.station_names = names
+        if names and self._held is not None:  # the held file is re-read, not re-requested
+            self._held = (self._held[0], with_home(self._held[1], names))
+
+    async def _fetch(self) -> HeatAlertState:
+        now = dt_util.utcnow().astimezone(_JST)
+        today = now.date()
+        if not in_season(today):
+            self._held, self._missing = None, {}
+            return HeatAlertState(None)  # out of season: no request at all
+        if not self.station_names:
+            await self._load_station_names()
+        held_name = self._held[0] if self._held else None
+        found: tuple[tuple[date, int], Any] | None = None
+        requests = 0
+        for i, name in enumerate(expected_files(now)):
+            if name == held_name:
+                break  # already have this one (or a newer one): nothing to request
+            if requests >= self.MAX_REQUESTS:
+                break
+            missed = self._missing.get(name)
+            if i > 0 and missed is not None and now - missed < timedelta(hours=1):
+                continue  # answered 404 / unusable within the last hour; only the newest is retried
+            requests += 1
+            day, hour = name
+            body = await self.api.get_bytes(URL_HEAT_ALERT.format(
+                year=day.year, ymd=day.strftime("%Y%m%d"), hh=f"{hour:02d}"))
+            text = None if body is None else body.decode("utf-8", errors="replace")
+            bulletin = None if text is None else parse_heat_alert(
+                text, self.cfg.office, self.station_names)
+            if bulletin is None:
+                self._missing[name] = now  # 404, a drill / test file, or no row for the office
+                if text is not None:
+                    self._log_unusable(name, text)
+                continue
+            found = (name, bulletin)
+            break
+        self._missing = {k: v for k, v in self._missing.items() if now - v < timedelta(hours=1)}
+        if found is not None and (self._held is None or found[1].report_time > self._held[1].report_time):
+            self._held = found
+            events = new_alerts(found[1], today, self._memory)
+            for data in events:
+                self._emit("heat_alert", data)
+            if events:
+                self._save()
+        return HeatAlertState(self._held[1] if self._held else None)
+
+    def _log_unusable(self, name: tuple[date, int], text: str) -> None:
+        """A 200 answer with no bulletin: a drill / test file is expected (debug); anything else may
+        be a changed layout, so say so once per file name."""
+        label = f"alert_{name[0]:%Y%m%d}_{name[1]:02d}.csv"
+        if file_status(text) in HEAT_ALERT_NON_ALERT_STATUSES:
+            _LOGGER.debug("heat alert: %s is a drill / test file", label)
+        elif name not in self._warned:
+            self._warned.add(name)
+            _LOGGER.warning("heat alert: %s answered 200 but has no usable row for office %s "
+                            "(status %r); a changed file layout would look like this",
+                            label, self.cfg.office, file_status(text))
 
 
 class JapanCoordinator(_JmaCoordinator[JapanForecast]):
@@ -672,6 +826,8 @@ class JmaRuntime:
     wbgt: WbgtCoordinator
     layers: LayersCoordinator
     japan: JapanCoordinator
+    heat_alert: HeatAlertCoordinator
+    memory: AlertMemory
     debug_simulate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -679,8 +835,14 @@ class JmaRuntime:
     def coordinators(self) -> list[_JmaCoordinator]:
         return [
             self.forecast, self.hourly, self.amedas, self.warnings, self.nowcast,
-            self.timeline, self.typhoon, self.wbgt, self.layers, self.japan,
+            self.timeline, self.typhoon, self.wbgt, self.layers, self.japan, self.heat_alert,
         ]
+
+    def set_alerts_ready(self) -> None:
+        """Called once the platforms are set up: events held from the first polls go out now."""
+        self.nowcast.alerts_ready = True
+        for emitter in (self.warnings, self.typhoon, self.heat_alert):
+            emitter.set_alerts_ready()
 
 
 type JmaConfigEntry = ConfigEntry[JmaRuntime]

@@ -1,4 +1,5 @@
 {
-  "name": "JMA weather (気象庁)",
+  "name": "JMA Weather (Unofficial)",
+  "country": "JP",
   "homeassistant": "2026.9.0"
 }

@@ -1,0 +1,49 @@
+name: Bug report
+description: Something does not work as the README says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not post your coordinates. The diagnostics file hides them.
+  - type: input
+    id: version
+    attributes:
+      label: Integration version
+      description: "`version` in `custom_components/jma/manifest.json`, or the version HACS shows."
+      placeholder: "0.6.0"
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.9.4"
+    validations:
+      required: true
+  - type: input
+    id: office
+    attributes:
+      label: Forecast office and municipality
+      description: "For example 東京都 (130000) and 千代田区 (1310100)."
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        Settings, Devices & services, JMA Weather (Unofficial), three dots, **Download diagnostics**.
+        Drag the file here, or paste the part about the feed that fails.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: "Add `custom_components.jma: debug` under `logger:` in `configuration.yaml` and paste the lines of the failing feed."
+      render: text

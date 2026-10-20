@@ -83,6 +83,14 @@ async def async_get_config_entry_diagnostics(
             "down_since": rt.quake.down_since.isoformat() if rt.quake.down_since else None,
             "last_message": rt.quake.last_message.isoformat() if rt.quake.last_message else None,
         },
+        "tsunami": {
+            "home_area": rt.quake.tsunami.home_area,
+            "replayed": rt.quake.tsunami.replayed,
+            "current_id": rt.quake.tsunami.current.id if rt.quake.tsunami.current else None,
+            "issued": rt.quake.tsunami.current.issued.isoformat()
+            if rt.quake.tsunami.current else None,
+            "memory": dict(rt.quake.tsunami.memory),
+        },
     }
     secrets = _secrets(entry)
     return {key: (value if key in ("entry", "config") else _scrub(value, secrets)) for key, value in out.items()}

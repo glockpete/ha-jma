@@ -1,4 +1,5 @@
 {
+  "title": "JMA天気（気象庁データ・非公式）",
   "config": {
     "step": {
       "user": {
@@ -33,6 +34,9 @@
           "debug_simulate": "テスト用アクション jma.simulate を有効にする"
         }
       }
+    },
+    "error": {
+      "invalid_station": "AMeDAS の観測所番号は5桁の数字です（例：44071）。"
     }
   },
   "entity": {
@@ -69,6 +73,23 @@
       },
       "japan": {
         "name": "全国の天気"
+      },
+      "tsunami": {
+        "name": "津波",
+        "state": {
+          "none": "なし",
+          "watch": "津波注意報",
+          "warning": "津波警報",
+          "major_warning": "大津波警報"
+        }
+      },
+      "heat_alert": {
+        "name": "熱中症警戒",
+        "state": {
+          "none": "なし",
+          "alert": "熱中症警戒アラート",
+          "special": "熱中症特別警戒アラート"
+        }
       }
     },
     "binary_sensor": {
@@ -90,7 +111,12 @@
               "rain_arriving": "雨雲の接近",
               "earthquake": "地震",
               "eew": "緊急地震速報",
-              "eew_cancelled": "緊急地震速報の取り消し"
+              "eew_cancelled": "緊急地震速報の取り消し",
+              "tsunami": "津波警報・注意報",
+              "tsunami_cancelled": "津波警報・注意報の解除",
+              "typhoon_approach": "台風の接近",
+              "typhoon_cleared": "台風の接近の解消",
+              "heat_alert": "熱中症警戒アラートの発表"
             }
           }
         }

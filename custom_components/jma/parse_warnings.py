@@ -75,6 +75,10 @@ class AreaWarnings:
     control_times: dict[str, str]
     area_missing: bool
     headlines: dict[str, str | None] = field(default_factory=dict)
+    # In-force kinds whose code is not in WARNING_CODES: not warnings that can be ranked or alerted on
+    # (they must not be listed as level-0 "active warnings" or announced as
+    # warning_issued with new_level 0). Surfaced as the warning-level sensor's `unknown_codes`.
+    unknown_codes: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -116,6 +120,7 @@ def parse_area_warnings(records: Any, area: str) -> AreaWarnings:
     # is about an island group of the same office).
     own: tuple[str, str | None] | None = None
     headlines: dict[str, str | None] = {}
+    unknown: dict[tuple[str, str, str], dict[str, Any]] = {}
     try:
         for record in records:
             dtc = record["dataTypeCode"]
@@ -138,9 +143,15 @@ def parse_area_warnings(records: Any, area: str) -> AreaWarnings:
                         continue
                     in_force_here = True
                     if code not in WARNING_CODES:
-                        _log_once(f"code:{code}", "r8 warnings: unknown code %r (status %r), "
-                                  "shown as level 0 and never alerted", code, status)
-                    phenomenon, level = WARNING_CODES.get(code, (f"code_{code}", 0))
+                        # Not a level-0 warning and not an alert: left out of the list and the diff,
+                        # kept visible in `unknown_codes` so a code JMA adds later is not lost.
+                        _log_once(f"code:{code}", "r8 warnings: unknown code %r (status %r) in %s: left out of the "
+                                  "warning list and never alerted (listed in the sensor's unknown_codes)",
+                                  code, status, dtc)
+                        unknown.setdefault((str(code), str(status), dtc),
+                                           {"code": str(code), "status": str(status), "data_type": dtc})
+                        continue
+                    phenomenon, level = WARNING_CODES[code]
                     name_ja, name_en = warning_names(phenomenon, level)
                     extra = {k: v for k, v in kind.items() if k not in ("code", "status")}
                     warning = Warning(code, phenomenon, level, status, name_ja, name_en,
@@ -164,6 +175,7 @@ def parse_area_warnings(records: Any, area: str) -> AreaWarnings:
         control_times=control_times,
         area_missing=not found,
         headlines=headlines,
+        unknown_codes=[unknown[k] for k in sorted(unknown)],
     )
 
 

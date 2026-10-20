@@ -285,8 +285,20 @@ def test_eew_area_counts_by_prefecture_not_by_the_spelling_of_its_name():
 def test_eew_cancel_only_after_an_alert():
     t = EewTracker(QUAKE_PLACE.pref)
     assert t.feed(_eew(9, 45, 50, cancelled=True), NOW) == []
+    assert t.feed(_eew(1, 45, 50), NOW) == []
+    t = EewTracker(QUAKE_PLACE.pref)
     t.feed(_eew(1, 45, 50), NOW)
     assert [e["type"] for e in t.feed(_eew(2, 45, 50, cancelled=True), NOW)] == ["eew_cancelled"]
+    assert t.feed(_eew(1, 45, 50), NOW) == []
+    assert t.feed(_eew(3, 50, 55), NOW) == []
+
+
+def test_eew_live_replay_has_same_freshness_limit_as_backfill():
+    assert EewTracker(QUAKE_PLACE.pref).feed(_eew(1, 45, 50), NOW + timedelta(days=1)) == []
+    msg = _eew(1, 45, 50)
+    del msg["issue"]["time"]
+    assert EewTracker(QUAKE_PLACE.pref).feed(msg, NOW) == []
+    assert EewTracker(QUAKE_PLACE.pref).feed(_eew(1, 45, 50), NOW - timedelta(minutes=5)) == []
 
 
 def test_eew_99_means_or_more():

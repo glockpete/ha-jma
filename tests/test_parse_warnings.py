@@ -145,5 +145,5 @@ def test_headline_comes_from_the_warnings_own_bulletin():
     own["headlineText"], own["reportDatetime"] = "千代田区に大雨警報", "2026-09-26T10:00:00+09:00"
     other["headlineText"], other["reportDatetime"] = "伊豆諸島に雷注意報", "2026-09-26T11:00:00+09:00"
     area = parse_area_warnings(records, AREA)
-    (w,) = [w for w in area.warnings if w.phenomenon == "rain"]
+    (w,) = (w for w in area.warnings if w.phenomenon == "rain")
     assert area.headlines[w.data_type] == "千代田区に大雨警報"

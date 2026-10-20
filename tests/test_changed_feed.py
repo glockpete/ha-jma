@@ -247,14 +247,15 @@ def test_every_coordinator_of_the_runtime_has_a_case_here() -> None:
 
     from custom_components.jma import coordinator as coordinator_module
     from custom_components.jma.coordinator import JmaRuntime, _JmaCoordinator
-    covered = {attr for attr, _ in FEEDS.values()} | {"amedas", "wbgt", "typhoon", "layers"}
+    # heat_alert: a changed layout of its CSV is tested in test_heat_alert.py (warned once per file name).
+    covered = {attr for attr, _ in FEEDS.values()} | {"amedas", "wbgt", "typhoon", "layers", "heat_alert"}
     # The coordinators of the runtime are read from its field types, not listed by hand: a coordinator added
     # to JmaRuntime without a case here fails this test. (The annotations are strings; the one that names a
     # class this module does not import, the quake client, is not a coordinator.)
     runtime_coordinators = {f.name for f in dataclasses.fields(JmaRuntime)
                             if isinstance(getattr(coordinator_module, str(f.type), None), type)
                             and issubclass(getattr(coordinator_module, str(f.type)), _JmaCoordinator)}
-    assert len(runtime_coordinators) == 10
+    assert len(runtime_coordinators) == 11
     assert covered == runtime_coordinators
 
 

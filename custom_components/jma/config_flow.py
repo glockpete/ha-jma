@@ -8,6 +8,7 @@ chosen by distance: primary = nearest measuring temperature, secondary = nearest
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -156,16 +157,28 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
         return JmaOptionsFlow()
 
 
+STATION_ID = re.compile(r"\d{5}")
+
+
 class JmaOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        if user_input is not None:
-            return self.async_create_entry(data=user_input)
         data = {**self.config_entry.data, **self.config_entry.options}
-        return self.async_show_form(step_id="init", data_schema=vol.Schema({
-            # A mistyped id would 404 silently and move every reading to the other station, so the format is checked.
-            vol.Required(CONF_STATION_PRIMARY, default=data[CONF_STATION_PRIMARY]): vol.All(
-                str, vol.Match(r"^\d{5}$")),
-            vol.Required(CONF_STATION_SECONDARY, default=data[CONF_STATION_SECONDARY]): vol.All(
-                str, vol.Match(r"^\d{5}$")),
-            vol.Required(CONF_DEBUG_SIMULATE, default=data.get(CONF_DEBUG_SIMULATE, False)): bool,
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            cleaned = dict(user_input)
+            for key in (CONF_STATION_PRIMARY, CONF_STATION_SECONDARY):
+                # A typo used to 404 silently and quietly move every reading to the other station.
+                cleaned[key] = str(user_input.get(key, "")).strip()
+                if not STATION_ID.fullmatch(cleaned[key]):
+                    errors[key] = "invalid_station"
+            if not errors:
+                return self.async_create_entry(data=cleaned)
+            data = {**data, **cleaned}
+        # The five-digit check is made above and NOT in the schema: Home Assistant has to turn the
+        # schema into form fields, and a vol.Match cannot be turned into one (the Configure dialog
+        # answered HTTP 500 on 2026.9.4; tests that call the flow in Python never saw it).
+        return self.async_show_form(step_id="init", errors=errors, data_schema=vol.Schema({
+            vol.Required(CONF_STATION_PRIMARY, default=str(data[CONF_STATION_PRIMARY])): str,
+            vol.Required(CONF_STATION_SECONDARY, default=str(data[CONF_STATION_SECONDARY])): str,
+            vol.Required(CONF_DEBUG_SIMULATE, default=bool(data.get(CONF_DEBUG_SIMULATE, False))): bool,
         }))
