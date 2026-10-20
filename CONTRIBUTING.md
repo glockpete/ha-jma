@@ -15,7 +15,7 @@ and the real files of each service saved in `tests/fixtures`, so they need no ne
 ```bash
 python -m venv .venv
 . .venv/bin/activate            # Windows: .venv\Scripts\activate
-pip install pytest-homeassistant-custom-component ruff
+pip install -r requirements_test.txt ruff
 pytest tests -q
 ruff check .
 ```

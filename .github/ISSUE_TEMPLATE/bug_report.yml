@@ -24,8 +24,8 @@ body:
   - type: input
     id: office
     attributes:
-      label: Forecast office and municipality
-      description: "For example 東京都 (130000) and 千代田区 (1310100)."
+      label: Forecast office
+      description: "The prefecture or region office, for example 東京都 (130000). A municipality is not needed; leave it out if it is where you live."
     validations:
       required: true
   - type: textarea
@@ -45,5 +45,5 @@ body:
     id: log
     attributes:
       label: Log lines
-      description: "Add `custom_components.jma: debug` under `logger:` in `configuration.yaml` and paste the lines of the failing feed."
+      description: "Add `custom_components.jma: debug` under `logger:` in `configuration.yaml` and paste the lines of the failing feed. Request addresses in the log can carry a map tile number or a station code that points to your area; remove those parts if you do not want to share them."
       render: text
