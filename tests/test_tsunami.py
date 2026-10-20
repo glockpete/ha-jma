@@ -1245,9 +1245,9 @@ def _eew_frame(now: datetime) -> str:
 
 
 async def test_a_live_eew_frame_is_not_held_up_by_a_slow_tsunami_list(freezer):
-    """The socket loop makes ONE request (the history) before it reads the socket. It must not make the EEW
-    wait for a second one: the history has answered, the tsunami list has not (a slow P2P API, up
-    to the 20 s timeout), and an EEW frame is already waiting in the socket."""
+    """The socket loop makes no request before it reads the socket (the history and the tsunami list run beside
+    it). It must not make the EEW wait for one: the history has answered, the tsunami list has not (a slow
+    P2P API, up to the 20 s timeout), and an EEW frame is already waiting in the socket."""
     freezer.move_to("2026-09-26T04:12:00+00:00")
     closed, list_answered = asyncio.Event(), asyncio.Event()
     asked: list[str] = []

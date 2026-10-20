@@ -12,6 +12,9 @@ DOMAIN: Final = "jma"
 VERSION: Final = "0.6.1"
 # Names the product and its version only; some services reject the default Python user agent.
 USER_AGENT: Final = f"ha-jma/{VERSION}"
+# The most bytes of one HTTP answer that are read (after decompression). The largest file the integration
+# meets (the sample files in the tests) is below 1 MB; tiles are a few KB. A body past this is refused.
+HTTP_MAX_BODY_BYTES: Final = 8 * 1024 * 1024
 # Credit wording as each service's terms ask for it. JMA: 「出典：気象庁ホームページ　（当該ページのURL）」 and, for
 # edited content, a separate statement that it was edited. Open-Meteo (CC BY 4.0): credit, a link to the licence,
 # an indication of changes, and a link next to the data (written out: an attribution is text).

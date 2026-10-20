@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import HEADERS, JmaApi
 from .const import (
+    EEW_FUTURE_TOLERANCE_S,
     QUAKE_BACKFILL_MAX_AGE_S,
     SHINDO,
     TSUNAMI_BACKFILL_LIMIT,
@@ -34,6 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 # 552 is NOT here: /v2/history?codes=552 answers [] (live 2026-10-03); see URL_P2P_TSUNAMI.
 # While the tsunami list has never answered, ask again this often inside an open connection.
 TSUNAMI_RETRY_S = 60
+LOG_INTERVAL_S = 300  # one WARNING per kind of bad frame in this time; the rest go to DEBUG, counted
 HISTORY_PARAMS = [("codes", "551"), ("codes", "556"), ("limit", "20")]
 
 
@@ -78,6 +81,23 @@ class QuakeClient:
         self.last_message: datetime | None = None
         self.last_quake: Quake | None = None
         self._retry_sleep: Callable[[float], Any] = asyncio.sleep  # injectable for tests
+        self._monotonic: Callable[[], float] = time.monotonic  # injectable for tests
+        self._log_state: dict[str, tuple[float, int]] = {}  # kind -> (when last warned, how many held back since)
+        self._backfill_task: asyncio.Task[None] | None = None
+
+    def _warn_limited(self, kind: str, msg: str, *args: Any, exc_info: bool = False) -> None:
+        """A WARNING for a kind of bad input at most once in LOG_INTERVAL_S; the rest go to DEBUG and are counted
+        in the next WARNING, so a flood of bad frames is one line, not one line per frame."""
+        now = self._monotonic()
+        last, held = self._log_state.get(kind, (None, 0))
+        if last is not None and now - last < LOG_INTERVAL_S:
+            self._log_state[kind] = (last, held + 1)
+            _LOGGER.debug(msg, *args, exc_info=exc_info)
+            return
+        self._log_state[kind] = (now, 0)
+        if held:
+            msg += f" (and {held:,} more of this kind since the last warning)"
+        _LOGGER.warning(msg, *args, exc_info=exc_info)
 
     def handle(self, msg: Any, now: datetime, backfill: bool = False) -> None:
         """Route one P2P message (pushed or replayed)."""
@@ -89,6 +109,14 @@ class QuakeClient:
             if msg.get("test") is True:
                 return
             parsed = parse_551(msg, self.place)
+            if parsed and parsed.time and (parsed.time - now).total_seconds() > EEW_FUTURE_TOLERANCE_S:
+                # The same guard as for an EEW: a quake "from the future" would become last_quake and make every
+                # real quake after it look older. Not remembered, so it counts when the clock is right again.
+                self._warn_limited(
+                    "future 551", "P2P 551 %s ignored: origin %s is more than %d min ahead of the clock (%s); "
+                    "the clock of this host looks wrong", parsed.id, parsed.time.isoformat(),
+                    EEW_FUTURE_TOLERANCE_S // 60, now.isoformat())
+                return
             if parsed and parsed.time and (
                 self.last_quake is None or self.last_quake.time is None
                 or parsed.time >= self.last_quake.time
@@ -147,15 +175,20 @@ class QuakeClient:
         """One malformed message must never end the socket task."""
         try:
             self.handle(msg, now, backfill=backfill)
-        except Exception:  # noqa: BLE001 - third-party payloads, any shape
-            _LOGGER.warning("P2P message skipped (unexpected shape): %.200r", msg, exc_info=True)
+        except Exception as err:  # noqa: BLE001 - third-party payloads, any shape
+            self._warn_limited(
+                f"bad frame {type(err).__name__}", "P2P message skipped (unexpected shape, %s): %.200r",
+                type(err).__name__, msg, exc_info=True)
 
     async def _backfill_quakes(self) -> None:
-        """Replay the quake / EEW history (the one request the socket loop waits for)."""
+        """Replay the quake / EEW history. It runs beside the socket loop (a task of the connection): live frames
+        are handled meanwhile, and nothing in here may end that task's connection."""
         try:
             items = await self._api.get_json(URL_P2P_HISTORY, HISTORY_PARAMS)
         except JmaError as err:
             _LOGGER.debug("P2P history unavailable: %s", err)
+        except Exception:  # noqa: BLE001 - a replay must never take the socket down
+            self._warn_limited("history", "P2P history replay failed", exc_info=True)
         else:
             now = dt_util.now()
             for msg in reversed(items if isinstance(items, list) else []):
@@ -193,8 +226,25 @@ class QuakeClient:
         except Exception:  # noqa: BLE001 - a retry must never take the socket down
             _LOGGER.warning("P2P tsunami retry stopped", exc_info=True)
 
+    def _start_backfill(self) -> None:
+        """The history of this connection, as a task the client owns; one still out from the last connection ends."""
+        self._stop_backfill()
+        self._backfill_task = asyncio.ensure_future(self._backfill_quakes())
+
+    def _stop_backfill(self) -> None:
+        if self._backfill_task is not None:
+            self._backfill_task.cancel()
+            self._backfill_task = None
+
     async def run(self) -> None:
-        """Connect forever. Backoff 1 -> 60 s, reset only by a connection that lasted 60 s, so
+        """Connect forever (see _run_connections); when this task is cancelled the history task ends with it."""
+        try:
+            await self._run_connections()
+        finally:
+            self._stop_backfill()
+
+    async def _run_connections(self) -> None:
+        """Backoff 1 -> 60 s, reset only by a connection that lasted 60 s, so
         a server that accepts and closes at once cannot make the client hammer it."""
         backoff = 1
         while True:
@@ -208,9 +258,10 @@ class QuakeClient:
                     self._on_quake()  # the sensor's `connected` attribute follows the socket
                     # History AFTER the socket is open: anything published while we connected is
                     # then in one or the other; id dedupe absorbs the overlap.
-                    # Only the history is waited for. The tsunami list runs as a task:
-                    # frames that arrive meanwhile are handled at once, the tracker dedupes.
-                    await self._backfill_quakes()
+                    # Nothing is waited for: the history (the client's task, it ends with the next connection or
+                    # the stop) and the tsunami list (cancelled with this connection) run beside the socket loop;
+                    # frames that arrive meanwhile are handled at once, the trackers dedupe.
+                    self._start_backfill()
                     retry = asyncio.ensure_future(self._tsunami_retry())
                     try:
                         async for msg in ws:
@@ -225,8 +276,7 @@ class QuakeClient:
                             elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                                 break
                     finally:
-                        if retry is not None:
-                            retry.cancel()
+                        retry.cancel()
             except asyncio.CancelledError:
                 raise
             except (TimeoutError, aiohttp.ClientError, OSError) as err:

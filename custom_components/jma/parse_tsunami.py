@@ -122,6 +122,11 @@ def parse_552(msg: Any) -> TsunamiBulletin | None:
         # Only a cancellation has no areas. A bulletin that is not one and carries no readable
         # area would picture as "nothing in force" and lift a warning that was announced.
         return None
+    if not cancelled and not any(a.rank for a in areas):
+        # Same for areas whose grade is "Unknown" (a value of the P2P schema) or not one of ours: every rank
+        # would read 0, "nothing in force", although nothing was cancelled. Ignored; state is left as it was.
+        _LOGGER.debug("tsunami bulletin %s ignored: no known grade in %d area(s)", bulletin_id, len(areas))
+        return None
     return TsunamiBulletin(bulletin_id, issued, cancelled, areas)
 
 

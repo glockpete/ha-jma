@@ -16,6 +16,7 @@ Addresses are compared as text (`in`, `startswith`, `==`), never as a pattern.
 from __future__ import annotations
 
 import logging
+import math
 import unicodedata
 from collections import OrderedDict
 from dataclasses import dataclass, replace
@@ -33,6 +34,8 @@ from .const import (
 JST = timezone(timedelta(hours=9))
 _LOGGER = logging.getLogger(__name__)
 WARNED_MAX = 200  # event ids remembered as warned about (clock far behind)
+ALERTED_MAX = 256  # EEW event ids remembered as alerted (the oldest go first)
+ALERTED_KEEP = timedelta(hours=6)  # ... and for how long at most
 
 
 def prefecture_for_office(office: Any) -> str | None:
@@ -166,10 +169,17 @@ def _pos(value: Any) -> Any:
 
 def _scale(value: Any) -> int | None:
     """A P2P scale code as int. The spec says scales may carry a decimal point ('45.0', only the
-    integer part counts), so floats are accepted; bools and anything else are not."""
+    integer part counts), so floats are accepted; bools, NaN, ±Infinity and anything else are not."""
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None  # (math.isfinite would raise OverflowError for an int of 400 digits: ints skip it)
     return int(value)
+
+
+def _scale_as_sent(value: Any) -> Any:
+    """A scale for an event payload as P2P sent it, except that NaN / ±Infinity (not JSON) read as unknown."""
+    return None if isinstance(value, float) and not math.isfinite(value) else value
 
 
 def parse_551(msg: Any, place: QuakePlace) -> Quake | None:
@@ -180,8 +190,10 @@ def parse_551(msg: Any, place: QuakePlace) -> Quake | None:
     in_pref: list[int] = []
     in_area: list[int] = []
     local: list[int] = []
-    for point in msg.get("points") or []:
-        scale = _scale(point.get("scale"))
+    points = msg.get("points")
+    for point in points if isinstance(points, list) else []:
+        # One malformed point (not an object, no readable scale) is skipped; the others still make the quake.
+        scale = _scale(point.get("scale")) if isinstance(point, dict) else None
         if scale is None or not place.is_pref(point.get("pref")):
             continue
         in_pref.append(scale)
@@ -297,7 +309,8 @@ class EewTracker:
     def __init__(self, pref: str | None, area: str | None = None) -> None:
         self.pref = pref
         self.area = area
-        self._alerted: dict[str, int] = {}
+        # event id -> (highest scale announced, when). Ordered by the last announcement; bounded (see feed()).
+        self._alerted: dict[str, tuple[int, datetime]] = {}
         self._cancelled: dict[str, datetime] = {}
         self._warned_future: OrderedDict[str, None] = OrderedDict()  # event ids already warned about
 
@@ -348,6 +361,9 @@ class EewTracker:
         keep_s = EEW_BACKFILL_MAX_AGE_S + EEW_FUTURE_TOLERANCE_S
         self._cancelled = {key: at for key, at in self._cancelled.items()
                            if (now - at).total_seconds() <= keep_s}
+        # An id is of no use once a replay of it can no longer pass _fresh_enough: forget it after ALERTED_KEEP, and
+        # never hold more than ALERTED_MAX (a flood of distinct ids must not grow the memory for good).
+        self._alerted = {key: seen for key, seen in self._alerted.items() if now - seen[1] <= ALERTED_KEEP}
         if event_id in self._cancelled:
             return []
         quake = msg.get("earthquake") or {}
@@ -372,12 +388,15 @@ class EewTracker:
         area = max(areas, key=self._predicted)  # the strongest matched area gives the numbers (ties: first)
         predicted = self._predicted(area)
         before = self._alerted.get(event_id)
-        if before is not None and predicted <= before:
+        if before is not None and predicted <= before[0]:
             return []
-        self._alerted[event_id] = predicted
+        self._alerted.pop(event_id, None)  # (re)insert at the end: the oldest announcement is the first key
+        self._alerted[event_id] = (predicted, now)
+        while len(self._alerted) > ALERTED_MAX:
+            del self._alerted[next(iter(self._alerted))]
         return [{
             "type": "eew", **base, "areas": [a.get("name") for a in areas],
-            "scale_from": area.get("scaleFrom"), "scale_to": area.get("scaleTo"),
+            "scale_from": _scale_as_sent(area.get("scaleFrom")), "scale_to": _scale_as_sent(area.get("scaleTo")),
             "predicted_scale": predicted, "arrival_time": area.get("arrivalTime"),
             "update": before is not None,
         }]
