@@ -3,6 +3,19 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
+## 0.6.2 - plain-English README
+
+### Changed
+
+- The README is rewritten in plain English: shorter sentences, the same facts, reference material in tables, and
+  numbered steps for installing and setting up. The Japanese summary moved to `README.ja.md`.
+- The README now says exactly which feeds the feed-problem sensor watches and states the rule of `rain_arriving`;
+  the event data lists name every field the code sends. The counts for the municipality name match are rounded.
+- The GitHub Actions used by the checks are updated to checkout 7.0.1, setup-python 7.0.0 and ruff-action 4.1.0
+  (still pinned by commit SHA).
+
+No change to the integration's behaviour.
+
 ## 0.6.1 - earthquake area for the 23 wards of Tokyo
 
 ### Added

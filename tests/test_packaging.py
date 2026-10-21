@@ -45,7 +45,7 @@ def test_strings_json_is_not_shipped():
 def test_manifest():
     manifest = _load(COMPONENT / "manifest.json")
     assert manifest["requirements"] == []  # Home Assistant itself requires Pillow
-    assert manifest["version"] == "0.6.1" == VERSION
+    assert manifest["version"] == "0.6.2" == VERSION
     for key in ("domain", "documentation", "issue_tracker", "codeowners", "name", "version"):
         assert manifest[key], key
 
