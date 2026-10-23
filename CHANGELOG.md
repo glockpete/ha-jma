@@ -48,11 +48,13 @@ Work towards the Home Assistant Integration Quality Scale.
   forecast needs them.
 - `sensor.jma_<place>_last_earthquake` and `sensor.jma_<place>_tsunami` become **unavailable** when the P2P地震情報
   connection has been down for more than 10 minutes, the limit the feed-problem sensor uses, and are available
-  again when it is back. A shorter drop changes nothing. The alerts event entity stays available.
+  again once the connection has been up for 60 seconds (a connection that drops sooner is part of the same outage).
+  A shorter drop changes nothing. The alerts event entity stays available.
 - **The log is written once per outage.** The earthquake connection writes one WARNING when an outage begins
   (`P2P earthquake connection lost` or `P2P earthquake connection cannot be opened`), debug lines for the retries and
-  one INFO when it is back. A feed writes one WARNING for a run of unexpected payloads and one INFO when its data is
-  back after N failed polls.
+  one INFO when a connection has been open for 60 seconds (a connection that drops sooner is part of the same
+  outage, so a server that closes every connection at once gives one WARNING, not one pair per connection). A feed
+  writes one WARNING for a run of unexpected payloads and one INFO when its data is back after N failed polls.
 - **The first refresh runs in two phases.** The four main feeds first. The other feeds, the heat-alert and typhoon
   files among them, only after the check for "Retrying setup" has passed, so that an alert decided in a set-up that
   is then retried is not remembered as announced.
@@ -83,7 +85,9 @@ Work towards the Home Assistant Integration Quality Scale.
   `JMA Chuo (Yamanashi)`. The city among towns keeps the plain name (`JMA Chiyoda`; Chiyoda Town in Gunma becomes
   `JMA Chiyoda (Gunma)`). This applies to places added from now on. Existing entries keep their title.
 - Moving the home in Settings left the rain tile on the old place until a restart. The entry now reloads when the
-  latitude or longitude changes. Any other change to the core configuration leaves it alone.
+  latitude or longitude changes in **Settings > System > General**. A home changed in `configuration.yaml` and
+  applied with `homeassistant.reload_core_config` fires no event, so reload the entry by hand. Any other change to
+  the core configuration leaves it alone.
 
 ## 0.6.2 - plain-English README
 

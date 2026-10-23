@@ -448,9 +448,9 @@ class _Rec:
         self.saves += 1
 
 
-def _client(api=None, memory=None, area=HOME) -> tuple[QuakeClient, _Rec]:
+def _client(api=None, memory=None, area=HOME, hass=None) -> tuple[QuakeClient, _Rec]:
     rec = _Rec()
-    qc = QuakeClient(api=api, fire=rec.fire, on_quake=rec.on_quake,  # type: ignore[arg-type]
+    qc = QuakeClient(hass=hass, api=api, fire=rec.fire, on_quake=rec.on_quake,  # type: ignore[arg-type]
                      place=QUAKE_PLACE, memory=memory if memory is not None else {}, save=rec.save, tsunami_area=area)
     return qc, rec
 
@@ -510,10 +510,10 @@ def _quake_msg(qid: str, when: str, tokyo: int) -> dict:
             "points": [{"pref": "東京都", "addr": "千代田区千代田", "isArea": False, "scale": tokyo}]}
 
 
-async def test_backfill_survives_a_tsunami_endpoint_failure(freezer):
+async def test_backfill_survives_a_tsunami_endpoint_failure(hass, freezer):
     freezer.move_to("2026-09-26T04:00:00+00:00")  # 13:00 JST
     api = _api(history=[_quake_msg("q1", "2026/09/26 12:58:00", 30)], tsunami=JmaFetchError("down"))
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     await _one_connection(qc)
     assert [t for t, _ in rec.events] == ["earthquake"]  # the quake replay was not lost
     assert qc.tsunami.replayed is False  # unknown, not "none", while the endpoint is down
@@ -524,11 +524,11 @@ async def test_backfill_survives_a_tsunami_endpoint_failure(freezer):
     assert api.get_json.await_args_list[1].args[1] == [("limit", str(TSUNAMI_BACKFILL_LIMIT))]
 
 
-async def test_backfill_survives_a_history_failure(freezer):
+async def test_backfill_survives_a_history_failure(hass, freezer):
     msg = load_json("p2p_552_majorwarning.json")
     freezer.move_to(_just_after(msg).astimezone(UTC))
     api = _api(history=JmaFetchError("down"), tsunami=[msg])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     await _one_connection(qc)
     assert [t for t, _ in rec.events] == ["tsunami"] and rec.events[0][1]["backfill"] is False
     assert qc.tsunami.replayed is True and rec.saves == 1 and rec.quakes >= 1
@@ -542,16 +542,16 @@ async def test_backfill_empty_tsunami_list_marks_replayed_and_refreshes_sensors(
     assert rec.events == [] and qc.tsunami.replayed is True and rec.quakes == 1
 
 
-async def test_backfill_non_list_tsunami_answer_is_not_a_replay(freezer):
+async def test_backfill_non_list_tsunami_answer_is_not_a_replay(hass, freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
-    qc, rec = _client(api=_api(history=[], tsunami={"error": "x"}))
+    qc, rec = _client(api=_api(history=[], tsunami={"error": "x"}), hass=hass)
     await _one_connection(qc)
     assert rec.events == [] and qc.tsunami.replayed is False  # a dict is not an answer
 
 
-async def test_backfill_both_endpoints_failing_raises_nothing(freezer):
+async def test_backfill_both_endpoints_failing_raises_nothing(hass, freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
-    qc, rec = _client(api=_api(history=JmaFetchError("a"), tsunami=JmaFetchError("b")))
+    qc, rec = _client(api=_api(history=JmaFetchError("a"), tsunami=JmaFetchError("b")), hass=hass)
     await _one_connection(qc)
     assert rec.events == [] and qc.tsunami.replayed is False
     # run() would swallow an exception and reconnect, so also call the two real units: neither may raise.
@@ -873,12 +873,12 @@ async def _one_connection(qc) -> None:
         await task
 
 
-async def test_run_logs_a_frame_that_is_not_json_and_goes_on_with_the_next(freezer, caplog):
+async def test_run_logs_a_frame_that_is_not_json_and_goes_on_with_the_next(hass, freezer, caplog):
     msg = _warning_bulletin()
     freezer.move_to((parse_552(msg).issued + timedelta(minutes=1)).astimezone(UTC))
     closed = asyncio.Event()
     api, _ = _api_with_sockets([_FrameSocket(['{"code": 552, "trunc', json.dumps(msg)], closed)], [[]])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     with caplog.at_level("DEBUG", logger="custom_components.jma.quake_ws"):
         task = asyncio.ensure_future(REAL_RUN(qc))
         await _yield_loop()
@@ -894,14 +894,14 @@ def test_the_test_only_backfill_is_gone():
     assert not hasattr(QuakeClient, "_backfill")
 
 
-async def test_run_retries_the_tsunami_list_every_minute_until_it_answers(freezer):
+async def test_run_retries_the_tsunami_list_every_minute_until_it_answers(hass, freezer):
     """the first list request fails; the socket stays open; the retry (driven here
     through the injectable wait, the freezer never lets a real sleep return) gets the list."""
     msg = _warning_bulletin()
     freezer.move_to((parse_552(msg).issued + timedelta(minutes=3)).astimezone(UTC))
     closed = asyncio.Event()
     api, calls = _api_with_sockets([_FrameSocket([], closed)], [JmaFetchError("timeout"), [msg]])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     waits: list[float] = []
 
     async def fake_wait(seconds: float) -> None:
@@ -922,11 +922,11 @@ async def test_run_retries_the_tsunami_list_every_minute_until_it_answers(freeze
         await task
 
 
-async def test_run_retry_keeps_asking_while_the_answer_is_not_a_list_and_dies_with_the_connection(freezer):
+async def test_run_retry_keeps_asking_while_the_answer_is_not_a_list_and_dies_with_the_connection(hass, freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
     closed = asyncio.Event()
     api, calls = _api_with_sockets([_FrameSocket([], closed)], [{"error": "busy"}])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     state: dict = {"asked": 0, "cancelled": False}
 
     async def fake_wait(seconds: float) -> None:
@@ -954,11 +954,11 @@ async def test_run_retry_keeps_asking_while_the_answer_is_not_a_list_and_dies_wi
     assert rec.events == []
 
 
-async def test_run_retry_survives_an_unexpected_error_without_touching_the_socket(freezer):
+async def test_run_retry_survives_an_unexpected_error_without_touching_the_socket(hass, freezer):
     freezer.move_to("2026-10-03T00:00:00+00:00")
     closed = asyncio.Event()
     api, calls = _api_with_sockets([_FrameSocket([], closed)], [JmaFetchError("a"), RuntimeError("boom")])
-    qc, _rec = _client(api=api)
+    qc, _rec = _client(api=api, hass=hass)
 
     async def fake_wait(seconds: float) -> None:
         await asyncio.sleep(0)
@@ -972,7 +972,7 @@ async def test_run_retry_survives_an_unexpected_error_without_touching_the_socke
         await task
 
 
-async def test_run_end_to_end_live_frame_then_reconnect_gives_one_event(freezer):
+async def test_run_end_to_end_live_frame_then_reconnect_gives_one_event(hass, freezer):
     """The real run() with a fake websocket and the real replays: a Tokyo Bay Warning arrives as
     a text frame, the socket drops, the reconnect's list already contains that bulletin: one event."""
     msg = _warning_bulletin()
@@ -981,7 +981,7 @@ async def test_run_end_to_end_live_frame_then_reconnect_gives_one_event(freezer)
     drop, hang = asyncio.Event(), asyncio.Event()
     api, calls = _api_with_sockets(
         [_FrameSocket([frame], drop), _FrameSocket([], hang)], [[], [msg]])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     real_sleep = asyncio.sleep
 
     async def quick_sleep(seconds, *a, **k):  # the reconnect backoff; the freezer would never return
@@ -1134,7 +1134,8 @@ async def test_expiry_through_the_ten_minute_timer_with_the_socket_silent(
     seen, get_json = _wire(hass, entry, aioclient_mock, msg)
     await setup(hass, entry)
     qc = entry.runtime_data.quake
-    qc.connected = True  # "silent" is a socket that is up and says nothing; one that never connected reads unavailable
+    qc.connected = True  # "silent" is a socket that is up and says nothing; one that has not been up for 60 s reads
+    qc.down_since = None  # unavailable after 10 minutes (what `_mark_back` does once a connection has lasted)
     qc.handle(msg, dt_util.now())
     await hass.async_block_till_done()
     assert hass.states.get("sensor.jma_chiyoda_tsunami").state == "warning"
@@ -1198,7 +1199,7 @@ async def test_sensor_reads_none_when_only_future_dated_bulletins_were_replayed(
     assert hass.states.get("sensor.jma_chiyoda_tsunami").state == "none" and seen == []
 
 
-async def test_run_retry_exists_on_every_connection_not_only_the_first(freezer):
+async def test_run_retry_exists_on_every_connection_not_only_the_first(hass, freezer):
     """R2-1: connection 1 gets its list (empty) -> no retry. The socket drops, a Tokyo Bay Warning is
     issued meanwhile; on connection 2 the list request fails once, the retry on THAT connection asks
     again and the warning is announced, exactly once."""
@@ -1207,7 +1208,7 @@ async def test_run_retry_exists_on_every_connection_not_only_the_first(freezer):
     drop, hold = asyncio.Event(), asyncio.Event()
     api, calls = _api_with_sockets(
         [_FrameSocket([], drop), _FrameSocket([], hold)], [[], JmaFetchError("timeout"), [msg]])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     waits: list[float] = []
     real_sleep = asyncio.sleep
 
@@ -1245,7 +1246,7 @@ def _eew_frame(now: datetime) -> str:
                       ensure_ascii=False)
 
 
-async def test_a_live_eew_frame_is_not_held_up_by_a_slow_tsunami_list(freezer):
+async def test_a_live_eew_frame_is_not_held_up_by_a_slow_tsunami_list(hass, freezer):
     """The socket loop makes no request before it reads the socket (the history and the tsunami list run beside
     it). It must not make the EEW wait for one: the history has answered, the tsunami list has not (a slow
     P2P API, up to the 20 s timeout), and an EEW frame is already waiting in the socket."""
@@ -1261,7 +1262,7 @@ async def test_a_live_eew_frame_is_not_held_up_by_a_slow_tsunami_list(freezer):
 
     fired: list[str] = []
     socket = _FrameSocket([_eew_frame(dt_util.now())], closed)
-    qc = QuakeClient(NS(session=NS(ws_connect=lambda *a, **k: socket), get_json=get_json),
+    qc = QuakeClient(hass, NS(session=NS(ws_connect=lambda *a, **k: socket), get_json=get_json),
                      lambda t, d: fired.append(t), lambda: None, place=QUAKE_PLACE, tsunami_area=HOME)
     task = asyncio.ensure_future(REAL_RUN(qc))
     try:
@@ -1280,14 +1281,14 @@ async def test_a_live_eew_frame_is_not_held_up_by_a_slow_tsunami_list(freezer):
             await task
 
 
-async def test_a_connection_that_drops_at_once_cancels_its_list_and_the_next_one_asks_again(freezer):
+async def test_a_connection_that_drops_at_once_cancels_its_list_and_the_next_one_asks_again(hass, freezer):
     """The list request belongs to its connection: a socket that closes before the list answered
     cancels it, and the next connection asks again and announces what is in force, once."""
     msg = _warning_bulletin()
     freezer.move_to((parse_552(msg).issued + timedelta(minutes=3)).astimezone(UTC))
     hold = asyncio.Event()
     api, calls = _api_with_sockets([_FrameSocket([]), _FrameSocket([], hold)], [[msg]])
-    qc, rec = _client(api=api)
+    qc, rec = _client(api=api, hass=hass)
     real_sleep = asyncio.sleep
 
     async def quick_backoff(seconds, *a, **k):

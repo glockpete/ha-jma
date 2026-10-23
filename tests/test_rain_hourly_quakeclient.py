@@ -127,7 +127,8 @@ def _q(qid: str, when: str, local: int) -> dict:
 
 def test_quake_client_routes_and_limits_replay():
     rec = _Rec()
-    qc = QuakeClient(api=None, fire=rec.fire, on_quake=rec.on_quake, place=QUAKE_PLACE)  # type: ignore[arg-type]
+    qc = QuakeClient(hass=None, api=None, fire=rec.fire, on_quake=rec.on_quake,  # type: ignore[arg-type]
+                     place=QUAKE_PLACE)
     now = datetime(2026, 9, 26, 13, 0, tzinfo=JST)
     qc.handle(_q("old", "2026/09/26 12:00:00", 40), now, backfill=True)  # 60 min old
     assert rec.events == []  # recorded, not alerted
@@ -151,7 +152,8 @@ def test_quake_client_fires_no_earthquake_without_a_point_of_the_prefecture():
     last_quake keeps tracking the newest one for the sensor, but nothing in the prefecture reported, so
     no push. backfill=False so the age guard cannot be the reason nothing fires -- only the rule can."""
     rec = _Rec()
-    qc = QuakeClient(api=None, fire=rec.fire, on_quake=rec.on_quake, place=QUAKE_PLACE)  # type: ignore[arg-type]
+    qc = QuakeClient(hass=None, api=None, fire=rec.fire, on_quake=rec.on_quake,  # type: ignore[arg-type]
+                     place=QUAKE_PLACE)
     now = datetime(2026, 9, 26, 13, 0, tzinfo=JST)
     for msg in load_json("p2p_551_sample_a.json"):
         qc.handle(msg, now, backfill=False)
@@ -199,7 +201,7 @@ async def test_socket_opens_before_history_and_survives_odd_errors(hass, monkeyp
     async def get_json(url, params=None):  # the tsunami list, asked beside the socket loop
         return []
 
-    client = QuakeClient(NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda *a: None, lambda: None,
+    client = QuakeClient(hass, NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda *a: None, lambda: None,
                          QUAKE_PLACE)
 
     async def backfill() -> None:
@@ -220,7 +222,8 @@ def test_earthquake_events_say_what_changed_for_the_real_ibaraki_sequence():
     the report that only adds the local figure and the epicentre is "detail" (an update of a
     notification, not another alarm)."""
     rec = _Rec()
-    qc = QuakeClient(api=None, fire=rec.fire, on_quake=rec.on_quake, place=QUAKE_PLACE)  # type: ignore[arg-type]
+    qc = QuakeClient(hass=None, api=None, fire=rec.fire, on_quake=rec.on_quake,  # type: ignore[arg-type]
+                     place=QUAKE_PLACE)
     now = datetime(2026, 8, 23, 2, 10, tzinfo=JST)
     for msg in sorted(load_json("p2p_551_sample_b.json"), key=lambda m: m["time"]):
         qc.handle(msg, now, backfill=False)

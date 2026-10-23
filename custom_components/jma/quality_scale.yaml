@@ -33,9 +33,9 @@ rules:
   config-entry-unloading: done  # __init__.py async_unload_entry; listeners and timers through entry.async_on_unload
   docs-configuration-parameters: done  # README "Options"
   docs-installation-parameters: done  # README "Set up"
-  entity-unavailable: done  # CoordinatorEntity for the polled feeds; sensor.py _QuakeSocketSensor after a 10-minute socket outage
+  entity-unavailable: done  # CoordinatorEntity for the polled feeds; sensor.py _QuakeSocketSensor after a 10-minute socket outage (a connection must last 60 s to end an outage)
   integration-owner: done  # manifest codeowners @glockpete
-  log-when-unavailable: done  # quake_ws.py one WARNING per outage and one INFO when back; coordinator.py one WARNING per run of failed polls
+  log-when-unavailable: done  # quake_ws.py one WARNING per outage and one INFO when back (a connection must last 60 s to end an outage); coordinator.py one WARNING per run of failed polls
   parallel-updates: done  # PARALLEL_UPDATES = 0 in sensor.py, binary_sensor.py, weather.py, event.py
   reauthentication-flow:
     status: exempt

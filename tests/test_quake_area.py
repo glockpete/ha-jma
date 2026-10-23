@@ -301,7 +301,7 @@ class _Rec:
 
 def _client(place: QuakePlace) -> tuple[QuakeClient, _Rec]:
     rec = _Rec()
-    return QuakeClient(api=None, fire=rec.fire, on_quake=rec.on_quake, place=place), rec  # type: ignore[arg-type]
+    return QuakeClient(hass=None, api=None, fire=rec.fire, on_quake=rec.on_quake, place=place), rec  # type: ignore[arg-type]
 
 
 QUAKE_NOW = datetime(2026, 9, 26, 12, 20, tzinfo=JST)

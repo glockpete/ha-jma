@@ -112,7 +112,7 @@ def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
         out["forecast"] = None
 
     q = rt.quake
-    if q.enabled and not q.connected and q.down_since and now - q.down_since > HEALTH_QUAKE_MAX_DOWN:
+    if q.enabled and q.down_since and now - q.down_since > HEALTH_QUAKE_MAX_DOWN:
         out["quake"] = f"P2P socket down since {q.down_since.isoformat()}"
     else:
         out["quake"] = None

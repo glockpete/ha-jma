@@ -44,7 +44,7 @@ def _warning_bulletin() -> dict[str, Any]:
 def _client() -> tuple[QuakeClient, list[Any], list[str]]:
     events: list[Any] = []
     pings: list[str] = []
-    qc = QuakeClient(api=None, fire=lambda t, d: events.append((t, d)),  # type: ignore[arg-type]
+    qc = QuakeClient(hass=None, api=None, fire=lambda t, d: events.append((t, d)),  # type: ignore[arg-type]
                      on_quake=lambda: pings.append("quake"), place=QUAKE_PLACE, tsunami_area=BAY)
     return qc, events, pings
 
@@ -145,7 +145,8 @@ async def test_the_timer_runs_the_tick_and_signals_only_a_change(
     freezer.move_to((issued + timedelta(minutes=3)).astimezone(UTC))
     await setup(hass, entry)
     qc = entry.runtime_data.quake
-    qc.connected = True  # an up, quiet socket; one that never connected reads unavailable after 10 minutes
+    qc.connected = True  # an up, quiet socket; one that has not been up for 60 s reads unavailable after 10 minutes
+    qc.down_since = None  # (what `_mark_back` does once a connection has lasted)
     qc.handle(msg, dt_util.now())
     await hass.async_block_till_done()
     assert hass.states.get(SENSOR).state == "warning"

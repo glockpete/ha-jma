@@ -241,7 +241,7 @@ class _Rec:
 
 def _client(place: QuakePlace) -> tuple[QuakeClient, _Rec]:
     rec = _Rec()
-    return QuakeClient(api=None, fire=rec.fire, on_quake=rec.on_quake, place=place), rec  # type: ignore[arg-type]
+    return QuakeClient(hass=None, api=None, fire=rec.fire, on_quake=rec.on_quake, place=place), rec  # type: ignore[arg-type]
 
 
 def test_the_event_fires_for_a_point_of_the_entrys_prefecture_and_not_for_one_elsewhere() -> None:

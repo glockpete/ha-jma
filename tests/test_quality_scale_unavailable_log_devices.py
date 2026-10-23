@@ -1,8 +1,9 @@
 """Three rules of the Home Assistant integration quality scale.
 
 entity-unavailable (Silver): the two sensors fed by the P2P earthquake socket read unavailable once the socket has
-been down for longer than HEALTH_QUAKE_MAX_DOWN (the feed-problem sensor's rule), and available again as soon as it
-reconnects. log-when-unavailable (Silver): one WARNING when a source is lost, one INFO when it is back, DEBUG between.
+been down for longer than HEALTH_QUAKE_MAX_DOWN (the feed-problem sensor's rule), and available again once a
+reconnection has lasted LASTING_S (60 s; a connection that drops sooner is part of the same outage).
+log-when-unavailable (Silver): one WARNING when a source is lost, one INFO when it is back, DEBUG between.
 devices (Gold): the device carries the integration's version.
 """
 
@@ -25,7 +26,7 @@ from pytest_homeassistant_custom_component.common import async_capture_events, a
 import custom_components.jma.sensor as sensor_module
 from custom_components.jma.const import DOMAIN, HEALTH_QUAKE_MAX_DOWN, VERSION
 from custom_components.jma.errors import JmaFetchError
-from custom_components.jma.quake_ws import QuakeClient
+from custom_components.jma.quake_ws import LASTING_S, QuakeClient
 
 from .conftest import AREA, QUAKE_PLACE, mock_jma, setup
 from .test_tsunami import NS, REAL_RUN, _FrameSocket, _yield_loop
@@ -58,9 +59,10 @@ async def test_the_socket_sensors_follow_how_long_the_socket_has_been_down(
     qc = entry.runtime_data.quake
     assert HEALTH_QUAKE_MAX_DOWN == timedelta(minutes=10)
 
-    # connected: available, however long it lasts
+    # connected and the connection has lasted LASTING_S (`_mark_back`, which the run loop's timer calls and which
+    # clears `down_since`): available, however long it lasts
     qc.connected = True
-    qc._on_quake()
+    qc._mark_back(dt_util.utcnow())
     await hass.async_block_till_done()
     await _minutes_pass(hass, freezer, 60)
     assert STATE_UNAVAILABLE not in _states(hass)
@@ -77,9 +79,15 @@ async def test_the_socket_sensors_follow_how_long_the_socket_has_been_down(
     await _minutes_pass(hass, freezer, 2)  # 11 minutes, and nothing has been signalled in between
     assert _states(hass) == [STATE_UNAVAILABLE, STATE_UNAVAILABLE]
 
-    # it reconnects: available at once, with the dispatcher's notification and no wait for the timer
+    # it reconnects, but the connection has not lasted yet: still the same outage, still unavailable
     qc.connected = True
     qc._on_quake()
+    await hass.async_block_till_done()
+    assert _states(hass) == [STATE_UNAVAILABLE, STATE_UNAVAILABLE]
+
+    # the connection has lasted LASTING_S: available at once, with the dispatcher's notification and no wait for the
+    # timer
+    qc._mark_back(dt_util.utcnow())
     await hass.async_block_till_done()
     assert STATE_UNAVAILABLE not in _states(hass)
 
@@ -102,7 +110,7 @@ async def test_a_reconnect_inside_the_limit_never_makes_the_sensors_unavailable(
     for _ in range(9):  # nine minutes, a tick each
         await _minutes_pass(hass, freezer, 1)
     qc.connected = True
-    qc._on_quake()
+    qc._mark_back(dt_util.utcnow())  # the connection lasted LASTING_S: the outage is over
     await hass.async_block_till_done()
     await _minutes_pass(hass, freezer, 30)
 
@@ -167,10 +175,22 @@ def _records(caplog, level: int) -> list[str]:
     return [r.getMessage() for r in caplog.records if r.levelno == level and r.name == QUAKE_LOG]
 
 
-async def _run_socket(steps: list[Any], caplog, *, after=None) -> bool:
+def _lasts(hass: HomeAssistant) -> None:
+    """The connection that is up has now been open LASTING_S: run the timer that ends the outage."""
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=LASTING_S + 1))
+
+
+def _lasting_connection(hass: HomeAssistant):
+    """An `after` hook for `_run_socket`: the connection that is up stays up for LASTING_S."""
+    async def after(_qc: QuakeClient) -> None:
+        _lasts(hass)
+    return after
+
+
+async def _run_socket(hass: HomeAssistant, steps: list[Any], caplog, *, after=None) -> bool:
     """Run the real connection loop: `steps` are what ws_connect does in turn (an Exception is raised, anything else
-    is the socket); the last step repeats. Back-off sleeps return at once. `after(qc)` may act once the loop is idle.
-    Returns whether the client was connected when the loop went idle (cancelling it marks it disconnected)."""
+    is the socket); the last step repeats. Back-off sleeps return at once. `await after(qc)` may act once the loop
+    is idle. Returns whether the client was connected when the loop went idle (cancelling it marks it disconnected)."""
     real_sleep = asyncio.sleep
     queue = list(steps)
 
@@ -186,14 +206,14 @@ async def _run_socket(steps: list[Any], caplog, *, after=None) -> bool:
     async def quick(_seconds, *_a, **_k):
         await real_sleep(0)
 
-    qc = QuakeClient(NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda t, d: None, lambda: None,
+    qc = QuakeClient(hass, NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda t, d: None, lambda: None,
                      place=QUAKE_PLACE)
     with caplog.at_level(logging.DEBUG, logger=QUAKE_LOG), patch(f"{QUAKE_LOG}.asyncio.sleep", new=quick):
         task = asyncio.ensure_future(REAL_RUN(qc))
         try:
             await _yield_loop(400)
             if after is not None:
-                after(qc)
+                await after(qc)
                 await _yield_loop(400)
             connected = qc.connected
         finally:
@@ -203,10 +223,10 @@ async def _run_socket(steps: list[Any], caplog, *, after=None) -> bool:
     return connected
 
 
-async def test_a_socket_that_cannot_be_opened_at_start_up_warns_once_and_says_when_it_is_back(caplog) -> None:
+async def test_a_socket_that_cannot_be_opened_at_start_up_warns_once_and_says_when_it_is_back(hass, caplog) -> None:
     refused = aiohttp.ClientConnectionError("Cannot connect to host api.p2pquake.net:443")
     steps = [refused, refused, OSError("network unreachable"), TimeoutError(), _FrameSocket([], asyncio.Event())]
-    assert await _run_socket(steps, caplog) is True
+    assert await _run_socket(hass, steps, caplog, after=_lasting_connection(hass)) is True
     warnings = _records(caplog, logging.WARNING)
     assert warnings == [
         "P2P earthquake connection cannot be opened: Cannot connect to host api.p2pquake.net:443; retrying"]
@@ -217,18 +237,22 @@ async def test_a_socket_that_cannot_be_opened_at_start_up_warns_once_and_says_wh
     assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
 
 
-async def test_a_dropped_connection_warns_once_per_outage_and_the_reconnect_logs_info_once(caplog) -> None:
+async def test_a_dropped_connection_warns_once_per_outage_and_the_reconnect_logs_info_once(hass, caplog) -> None:
     first_closed, second_closed = asyncio.Event(), asyncio.Event()
     first, second = _FrameSocket([], first_closed), _FrameSocket([], second_closed)
     down = OSError("network unreachable")
     # up, closed by the server, three refused attempts, up, closed again, up
     steps = [first, down, down, down, second, _FrameSocket([], asyncio.Event())]
 
-    def second_drop(_qc: QuakeClient) -> None:
-        second_closed.set()
+    async def second_drop(_qc: QuakeClient) -> None:
+        _lasts(hass)  # the second connection has lasted LASTING_S: its outage is over (the first INFO)
+        await _yield_loop(50)
+        second_closed.set()  # then the server closes it: a new outage, a new WARNING
+        await _yield_loop(50)
+        _lasts(hass)  # the third connection lasts: the second INFO
 
     first_closed.set()  # the first connection ends as soon as it is up
-    await _run_socket(steps, caplog, after=second_drop)
+    await _run_socket(hass, steps, caplog, after=second_drop)
     assert _records(caplog, logging.WARNING) == [
         "P2P earthquake connection lost: closed by the server; reconnecting",
         "P2P earthquake connection lost: closed by the server; reconnecting",
@@ -238,9 +262,10 @@ async def test_a_dropped_connection_warns_once_per_outage_and_the_reconnect_logs
     assert _records(caplog, logging.DEBUG).count("P2P socket: network unreachable") == 3
 
 
-async def test_an_unexpected_error_keeps_its_traceback_for_the_first_failure_of_an_outage_only(caplog) -> None:
+async def test_an_unexpected_error_keeps_its_traceback_for_the_first_failure_of_an_outage_only(hass, caplog) -> None:
     odd = RuntimeError("odd")
-    await _run_socket([odd, odd, odd, _FrameSocket([], asyncio.Event())], caplog)
+    await _run_socket(hass, [odd, odd, odd, _FrameSocket([], asyncio.Event())], caplog,
+                      after=_lasting_connection(hass))
     warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert [r.getMessage() for r in warnings] == [
         "P2P earthquake connection cannot be opened: unexpected RuntimeError; retrying"]
@@ -250,7 +275,7 @@ async def test_an_unexpected_error_keeps_its_traceback_for_the_first_failure_of_
     assert _records(caplog, logging.INFO) == ["P2P earthquake connection is back"]
 
 
-async def test_the_log_changes_neither_the_back_off_nor_the_bookkeeping(caplog) -> None:
+async def test_the_log_changes_neither_the_back_off_nor_the_bookkeeping(hass, caplog) -> None:
     """connected / down_since / the notifications are as before: down at the start, up once connected."""
     pings: list[bool] = []
     real_sleep = asyncio.sleep
@@ -271,7 +296,7 @@ async def test_the_log_changes_neither_the_back_off_nor_the_bookkeeping(caplog) 
         await real_sleep(0)
 
     holder: dict[str, QuakeClient] = {}
-    qc = QuakeClient(NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda t, d: None,
+    qc = QuakeClient(hass, NS(session=NS(ws_connect=ws_connect), get_json=get_json), lambda t, d: None,
                      lambda: pings.append(holder["qc"].connected), place=QUAKE_PLACE)
     holder["qc"] = qc
     began = qc.down_since

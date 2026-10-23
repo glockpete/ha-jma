@@ -284,6 +284,9 @@ The rain nowcast, the キキクル and rain-outlook values, the hourly forecast 
 the home location of Home Assistant. If you change the latitude or longitude in **Settings > System > General**, the
 entry reloads by itself and uses the new place. No restart is needed, and the rain tile follows. Saving the same
 place again, or changing something else in that dialog (units, time zone, name or elevation), does not reload it.
+The reload follows the event Home Assistant fires when that dialog saves. A home set in `configuration.yaml` and
+changed there, then applied with the `homeassistant.reload_core_config` action, fires no such event: reload the
+entry from its menu, or restart Home Assistant.
 
 The two weather stations are not picked again when the home moves. Run [Reconfigure](#reconfigure) for that.
 
@@ -439,9 +442,10 @@ is installed. In the entity ids below, `<place>` is the lower-case English name 
 **When the earthquake connection is down.** `sensor.jma_<place>_last_earthquake` and `sensor.jma_<place>_tsunami`
 get their data only from the P2P地震情報 connection. When that connection has been down for more than 10 minutes,
 both become `unavailable`. This is the limit the feed-problem sensor uses. A shorter drop changes nothing. Both are
-available again when the connection is back. A place without a connection (see [Known limits](#known-limits)) has
-them `unavailable` all the time. The alerts event entity stays available, because some of its events come from the
-polling feeds.
+available again once the connection has been up for 60 seconds. A connection that drops within 60 seconds counts as
+the same outage, so a server that accepts the connection and closes it at once does not make them switch back and
+forth. A place without a connection (see [Known limits](#known-limits)) has them `unavailable` all the time. The
+alerts event entity stays available, because some of its events come from the polling feeds.
 
 ### Alerts and status
 
@@ -841,7 +845,7 @@ Where a service states no rate limit, none is given here. The intervals in
   |---|---|---|
   | `P2P earthquake connection lost: <reason>; reconnecting` | WARNING | The earthquake connection was open and dropped. The integration reconnects by itself. |
   | `P2P earthquake connection cannot be opened: <reason>; retrying` | WARNING | A connection could not be opened, for example at start, when P2P地震情報 refuses it or cannot be reached. The integration tries again by itself. |
-  | `P2P earthquake connection is back` | INFO | The connection is open again. This ends the outage. |
+  | `P2P earthquake connection is back` | INFO | The connection has been open for 60 seconds. This ends the outage; a connection that dropped sooner was part of it. |
   | `jma <feed>: unexpected payload: <error>` | WARNING | A file arrived but did not have the shape the integration reads. The entities keep the last good data (see [Update intervals](#update-intervals)). `<feed>` is `forecast`, `hourly`, `amedas`, `warnings`, `nowcast`, `warning outlook`, `typhoon`, `wbgt`, `heat alert`, `japan` or `layers`. |
   | `jma <feed>: data is back after N failed poll(s)` | INFO | The feed works again after an "unexpected payload" run of N failed polls. |
 

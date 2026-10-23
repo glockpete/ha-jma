@@ -39,7 +39,8 @@ INF, NAN = float("inf"), float("nan")
 
 def _client(**kw) -> tuple[QuakeClient, list[tuple[str, dict]]]:
     fired: list[tuple[str, dict]] = []
-    return QuakeClient(kw.pop("api", None), lambda t, d: fired.append((t, d)), lambda: None, QUAKE_PLACE, **kw), fired
+    return QuakeClient(None, kw.pop("api", None), lambda t, d: fired.append((t, d)), lambda: None,  # type: ignore[arg-type]
+                       QUAKE_PLACE, **kw), fired
 
 
 def _warnings(caplog) -> list[logging.LogRecord]:
@@ -421,7 +422,7 @@ async def test_n5_a_normal_json_answer_still_works():
 
 # ---------------------------------------------------------------- N6: the history never stands in front of the socket
 
-def _connection(frames, closed, get_json):
+def _connection(hass, frames, closed, get_json):
     sockets = []
 
     def ws_connect(*a, **k):
@@ -429,7 +430,7 @@ def _connection(frames, closed, get_json):
         return sockets[-1]
 
     fired: list[str] = []
-    qc = QuakeClient(NS(session=NS(ws_connect=ws_connect), get_json=get_json),
+    qc = QuakeClient(hass, NS(session=NS(ws_connect=ws_connect), get_json=get_json),
                      lambda t, d: fired.append(t), lambda: None, place=QUAKE_PLACE, tsunami_area=HOME)
     return qc, fired, sockets
 
@@ -442,7 +443,7 @@ async def _stop(task, *events):
         await task
 
 
-async def test_n6_an_error_in_the_history_does_not_tear_the_connection_down(freezer, caplog):
+async def test_n6_an_error_in_the_history_does_not_tear_the_connection_down(hass, freezer, caplog):
     freezer.move_to("2026-09-26T04:12:00+00:00")
     closed = asyncio.Event()
 
@@ -451,7 +452,7 @@ async def test_n6_an_error_in_the_history_does_not_tear_the_connection_down(free
             raise RecursionError("maximum recursion depth exceeded")
         return []
 
-    qc, fired, sockets = _connection([_eew_frame(dt_util.now())], closed, get_json)
+    qc, fired, sockets = _connection(hass, [_eew_frame(dt_util.now())], closed, get_json)
     task = asyncio.ensure_future(REAL_RUN(qc))
     try:
         await _yield_loop(200)
@@ -462,7 +463,7 @@ async def test_n6_an_error_in_the_history_does_not_tear_the_connection_down(free
         await _stop(task, closed)
 
 
-async def test_n6_a_live_frame_is_handled_while_the_history_is_still_out(freezer):
+async def test_n6_a_live_frame_is_handled_while_the_history_is_still_out(hass, freezer):
     freezer.move_to("2026-09-26T04:12:00+00:00")
     closed, history_answered = asyncio.Event(), asyncio.Event()
 
@@ -471,7 +472,7 @@ async def test_n6_a_live_frame_is_handled_while_the_history_is_still_out(freezer
             await history_answered.wait()
         return []
 
-    qc, fired, _ = _connection([_eew_frame(dt_util.now())], closed, get_json)
+    qc, fired, _ = _connection(hass, [_eew_frame(dt_util.now())], closed, get_json)
     task = asyncio.ensure_future(REAL_RUN(qc))
     try:
         await _yield_loop(200)
@@ -480,7 +481,7 @@ async def test_n6_a_live_frame_is_handled_while_the_history_is_still_out(freezer
         await _stop(task, closed, history_answered)
 
 
-async def test_n6_the_history_is_still_replayed_when_it_answers_late(freezer):
+async def test_n6_the_history_is_still_replayed_when_it_answers_late(hass, freezer):
     freezer.move_to("2026-09-26T04:12:00+00:00")
     closed, history_answered = asyncio.Event(), asyncio.Event()
     stamp = dt_util.now().astimezone(JST).strftime("%Y/%m/%d %H:%M:%S")
@@ -492,7 +493,7 @@ async def test_n6_the_history_is_still_replayed_when_it_answers_late(freezer):
             return [old_quake]
         return []
 
-    qc, fired, _ = _connection([], closed, get_json)
+    qc, fired, _ = _connection(hass, [], closed, get_json)
     task = asyncio.ensure_future(REAL_RUN(qc))
     try:
         await _yield_loop(100)
@@ -504,7 +505,7 @@ async def test_n6_the_history_is_still_replayed_when_it_answers_late(freezer):
         await _stop(task, closed, history_answered)
 
 
-async def test_n6_the_history_task_ends_when_the_client_stops(freezer):
+async def test_n6_the_history_task_ends_when_the_client_stops(hass, freezer):
     freezer.move_to("2026-09-26T04:12:00+00:00")
     closed = asyncio.Event()
     state = {"cancelled": 0}
@@ -518,7 +519,7 @@ async def test_n6_the_history_task_ends_when_the_client_stops(freezer):
                 raise
         return []
 
-    qc, _, _ = _connection([], closed, get_json)
+    qc, _, _ = _connection(hass, [], closed, get_json)
     task = asyncio.ensure_future(REAL_RUN(qc))
     try:
         await _yield_loop(100)
@@ -531,7 +532,7 @@ async def test_n6_the_history_task_ends_when_the_client_stops(freezer):
         task.cancel()
 
 
-async def test_n6_a_new_connection_ends_the_history_still_out_from_the_last_one(freezer):
+async def test_n6_a_new_connection_ends_the_history_still_out_from_the_last_one(hass, freezer):
     freezer.move_to("2026-09-26T04:12:00+00:00")
     first_closed, second_closed = asyncio.Event(), asyncio.Event()
     state = {"asked": 0, "cancelled": 0}
@@ -547,7 +548,7 @@ async def test_n6_a_new_connection_ends_the_history_still_out_from_the_last_one(
         return []
 
     sockets = [_FrameSocket([], first_closed), _FrameSocket([], second_closed)]
-    qc = QuakeClient(NS(session=NS(ws_connect=lambda *a, **k: sockets.pop(0) if len(sockets) > 1 else sockets[0]),
+    qc = QuakeClient(hass, NS(session=NS(ws_connect=lambda *a, **k: sockets.pop(0) if len(sockets) > 1 else sockets[0]),
                         get_json=get_json), lambda t, d: None, lambda: None, place=QUAKE_PLACE, tsunami_area=HOME)
     real_sleep = asyncio.sleep
 

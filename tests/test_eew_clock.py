@@ -194,7 +194,7 @@ class _Rec:
 
 def _client() -> tuple[QuakeClient, _Rec]:
     rec = _Rec()
-    client = QuakeClient(api=None, fire=rec.fire, on_quake=lambda: None,  # type: ignore[arg-type]
+    client = QuakeClient(hass=None, api=None, fire=rec.fire, on_quake=lambda: None,  # type: ignore[arg-type]
                          place=QuakePlace(QUAKE_PLACE.pref, None))
     return client, rec
 

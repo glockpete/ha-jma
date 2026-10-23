@@ -437,7 +437,9 @@ class _QuakeSocketSensor(JmaEntity, SensorEntity):
     """A sensor whose only source is the P2P earthquake WebSocket (HA quality scale: entity-unavailable).
 
     Unavailable when the entry holds no connection, or once the socket has been down for longer than
-    HEALTH_QUAKE_MAX_DOWN (the rule of the feed-problem sensor); a reconnect inside that time changes nothing."""
+    HEALTH_QUAKE_MAX_DOWN (the rule of the feed-problem sensor); a reconnect inside that time changes nothing.
+    The outage ends only when a connection has lasted LASTING_S (QuakeClient clears `down_since`), so a server that
+    accepts and closes at once does not make the sensors flip on every connection."""
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -466,7 +468,7 @@ class _QuakeSocketSensor(JmaEntity, SensorEntity):
         if not quake.enabled:
             return False
         down_since = quake.down_since
-        return quake.connected or down_since is None or dt_util.utcnow() - down_since <= HEALTH_QUAKE_MAX_DOWN
+        return down_since is None or dt_util.utcnow() - down_since <= HEALTH_QUAKE_MAX_DOWN
 
 
 class LastEarthquakeSensor(_QuakeSocketSensor):

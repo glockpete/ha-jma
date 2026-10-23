@@ -153,7 +153,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         amedas=AmedasCoordinator(hass, entry, api, cfg),
         warnings=WarningsCoordinator(hass, entry, api, cfg, fire),
         nowcast=NowcastCoordinator(hass, entry, api, cfg, fire),
-        quake=QuakeClient(api, fire, on_quake, place, memory=memory.tsunami, save=memory.save,
+        quake=QuakeClient(hass, api, fire, on_quake, place, memory=memory.tsunami, save=memory.save,
                           tsunami_area=TSUNAMI_COAST_AREA.get(cfg.class10)),
         # Optional data: no events, no pushes, not part of feed health. The typhoon and heat-alert
         # coordinators also raise events.

@@ -16,6 +16,8 @@ from datetime import datetime
 from typing import Any
 
 import aiohttp
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from .api import HEADERS, JmaApi
@@ -36,6 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 # 552 is NOT here: /v2/history?codes=552 answers [] (live 2026-10-03); see URL_P2P_TSUNAMI.
 # While the tsunami list has never answered, ask again this often inside an open connection.
 TSUNAMI_RETRY_S = 60
+LASTING_S = 60  # a connection must stay open this long to end an outage and to reset the back-off
 LOG_INTERVAL_S = 300  # one WARNING per kind of bad frame in this time; the rest go to DEBUG, counted
 HISTORY_PARAMS = [("codes", "551"), ("codes", "556"), ("limit", "20")]
 
@@ -54,6 +57,7 @@ class QuakeClient:
 
     def __init__(
         self,
+        hass: HomeAssistant,
         api: JmaApi,
         fire: Callable[[str, dict[str, Any]], None],
         on_quake: Callable[[], None],
@@ -62,6 +66,7 @@ class QuakeClient:
         save: Callable[[], None] | None = None,
         tsunami_area: str | None = None,
     ) -> None:
+        self._hass = hass
         self._api = api
         self._fire = fire
         self._on_quake = on_quake
@@ -84,6 +89,7 @@ class QuakeClient:
         self._monotonic: Callable[[], float] = time.monotonic  # injectable for tests
         self._log_state: dict[str, tuple[float, int]] = {}  # kind -> (when last warned, how many held back since)
         self._outage_warned = False  # the outage running now has had its one WARNING; the INFO ends it
+        self._lasting: Callable[[], None] | None = None  # cancels the timer that ends the outage (LASTING_S)
         self._backfill_task: asyncio.Task[None] | None = None
 
     def _warn_limited(self, kind: str, msg: str, *args: Any, exc_info: bool = False) -> None:
@@ -111,6 +117,17 @@ class QuakeClient:
             _LOGGER.warning("P2P earthquake connection lost: %s; reconnecting", reason, exc_info=exc_info)
         else:  # nothing was up yet (start-up) or the outage began with a refused connection
             _LOGGER.warning("P2P earthquake connection cannot be opened: %s; retrying", reason, exc_info=exc_info)
+
+    @callback
+    def _mark_back(self, _now: datetime) -> None:
+        """The connection has lasted LASTING_S: the outage is over. One INFO if the outage was logged, and the sensors
+        look again at once. A connection that dropped sooner never gets here, it is part of the same outage."""
+        self._lasting = None
+        self.down_since = None
+        if self._outage_warned:
+            self._outage_warned = False
+            _LOGGER.info("P2P earthquake connection is back")
+        self._on_quake()
 
     def handle(self, msg: Any, now: datetime, backfill: bool = False) -> None:
         """Route one P2P message (pushed or replayed)."""
@@ -257,8 +274,10 @@ class QuakeClient:
             self._stop_backfill()
 
     async def _run_connections(self) -> None:
-        """Backoff 1 -> 60 s, reset only by a connection that lasted 60 s, so
-        a server that accepts and closes at once cannot make the client hammer it."""
+        """Backoff 1 -> 60 s, reset only by a connection that lasted LASTING_S, so
+        a server that accepts and closes at once cannot make the client hammer it. Such a server makes ONE outage,
+        not one per connection: only a connection that lasted LASTING_S ends it (`_mark_back`: `down_since`
+        cleared, the INFO), and one that dropped sooner leaves `down_since` and the one WARNING as they were."""
         backoff = 1
         while True:
             connected_at: datetime | None = None
@@ -268,9 +287,6 @@ class QuakeClient:
                 ) as ws:
                     self.connected = True
                     connected_at = dt_util.utcnow()
-                    if self._outage_warned:
-                        self._outage_warned = False
-                        _LOGGER.info("P2P earthquake connection is back")
                     self._on_quake()  # the sensor's `connected` attribute follows the socket
                     # History AFTER the socket is open: anything published while we connected is
                     # then in one or the other; id dedupe absorbs the overlap.
@@ -280,6 +296,7 @@ class QuakeClient:
                     self._start_backfill()
                     retry = asyncio.ensure_future(self._tsunami_retry())
                     try:
+                        self._lasting = async_call_later(self._hass, LASTING_S, self._mark_back)  # ends the outage
                         async for msg in ws:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 self.last_message = dt_util.utcnow()
@@ -293,6 +310,9 @@ class QuakeClient:
                                 break
                     finally:
                         retry.cancel()
+                        if self._lasting is not None:
+                            self._lasting()
+                            self._lasting = None
             except asyncio.CancelledError:
                 raise
             except (TimeoutError, aiohttp.ClientError, OSError) as err:
@@ -304,12 +324,10 @@ class QuakeClient:
                 self._log_outage(True, "closed by the server")
             finally:
                 now = dt_util.utcnow()
-                lasted = connected_at is not None and (now - connected_at).total_seconds() >= 60
-                if lasted:
+                if connected_at is not None and (now - connected_at).total_seconds() >= LASTING_S:
                     backoff = 1
-                    self.down_since = now  # a fresh outage starts now
-                elif self.down_since is None:
-                    self.down_since = now  # otherwise the outage that was already running continues
+                if self.down_since is None:
+                    self.down_since = now  # a lasting connection ended the last outage; otherwise it continues
                 if self.connected:
                     self.connected = False
                     self._on_quake()
