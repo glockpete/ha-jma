@@ -3,6 +3,27 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["custom_components/jma"]
+
+[tool.coverage.report]
+show_missing = true
+# Total gate: pytest-cov fails the run below this (ci: tests.yml "Run the tests with the total coverage gate").
+fail_under = 95
+# Two decimals so 94.6 % is not rounded up to 95 % and let through.
+precision = 2
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage-threshold]
+# Per-module gate: coverage-threshold fails when any file in coverage.json is below this
+# (ci: tests.yml "Per-module coverage gate").
+file_line_coverage_min = 95
+# The tool also checks the total and defaults it to 100 % when unset; keep this equal to fail_under above.
+line_coverage_min = 95
+
 [tool.ruff]
 target-version = "py313"
 line-length = 120

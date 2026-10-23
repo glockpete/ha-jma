@@ -19,8 +19,15 @@ jobs:
           python-version: "3.14"
       - name: Install the test dependencies
         run: pip install -r requirements_test.txt
-      - name: Run the tests
-        run: pytest tests -q
+      # Gate 1 - TOTAL: pytest-cov fails the run when total coverage of custom_components/jma
+      # drops below fail_under (95 %, set in pyproject.toml [tool.coverage.report]).
+      - name: Run the tests with the total coverage gate
+        run: pytest tests -q --cov --cov-report=term-missing --cov-report=json
+      # Gate 2 - PER MODULE: coverage-threshold reads coverage.json and fails when ANY file under
+      # custom_components/jma is below file_line_coverage_min (95 %, set in pyproject.toml
+      # [tool.coverage-threshold]); it lists every offending file.
+      - name: Per-module coverage gate
+        run: coverage-threshold
 
   ruff:
     runs-on: "ubuntu-latest"
