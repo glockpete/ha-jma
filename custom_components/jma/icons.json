@@ -1,0 +1,67 @@
+{
+  "entity": {
+    "sensor": {
+      "warning_level": {
+        "default": "mdi:alert",
+        "range": {
+          "0": "mdi:shield-check-outline",
+          "2": "mdi:alert-outline",
+          "3": "mdi:alert",
+          "4": "mdi:alert-octagon",
+          "5": "mdi:alert-octagram"
+        }
+      },
+      "radar_frames": {
+        "default": "mdi:radar"
+      },
+      "overview": {
+        "default": "mdi:text-box-outline"
+      },
+      "last_earthquake": {
+        "default": "mdi:waveform"
+      },
+      "warning_outlook": {
+        "default": "mdi:alert-outline"
+      },
+      "typhoon": {
+        "default": "mdi:weather-hurricane"
+      },
+      "wbgt": {
+        "default": "mdi:sun-thermometer"
+      },
+      "kikikuru": {
+        "default": "mdi:home-flood"
+      },
+      "japan": {
+        "default": "mdi:map-outline"
+      },
+      "tsunami": {
+        "default": "mdi:tsunami",
+        "state": {
+          "none": "mdi:waves",
+          "watch": "mdi:waves-arrow-up",
+          "warning": "mdi:home-flood",
+          "major_warning": "mdi:alert-octagram"
+        }
+      },
+      "heat_alert": {
+        "default": "mdi:sun-thermometer-outline",
+        "state": {
+          "none": "mdi:thermometer",
+          "alert": "mdi:thermometer-alert",
+          "special": "mdi:thermometer-high"
+        }
+      }
+    },
+    "event": {
+      "alerts": {
+        "default": "mdi:bullhorn"
+      }
+    }
+  },
+  "services": {
+    "simulate": {
+      "service": "mdi:test-tube"
+    }
+  }
+}

@@ -78,7 +78,6 @@ class WarningLevelSensor(_CoordSensor):
     """0 = nothing in force; 2..5 = highest JMA level for the area."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_icon = "mdi:alert"
 
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "warning_level", entry.runtime_data.warnings)
@@ -145,7 +144,7 @@ class RadarFramesSensor(_CoordSensor):
     """
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_icon = "mdi:radar"
+    _attr_entity_registry_enabled_default = False  # frame lists for map cards: switch on when a card needs them
     _unrecorded_attributes = frozenset({"past", "forecast", "tile_template", "home", "zoom", "layers"})
 
     def __init__(self, entry: JmaConfigEntry) -> None:
@@ -183,7 +182,6 @@ class RadarFramesSensor(_CoordSensor):
 class OverviewSensor(_CoordSensor):
     """JMA's prose overview for the office (Japanese)."""
 
-    _attr_icon = "mdi:text-box-outline"
     _unrecorded_attributes = frozenset({"text"})
 
     def __init__(self, entry: JmaConfigEntry) -> None:
@@ -211,7 +209,6 @@ class OverviewSensor(_CoordSensor):
 class WarningOutlookSensor(_CoordSensor):
     """Highest warning level (0/2..5) JMA's 3-hourly risk outlook expects for the area."""
 
-    _attr_icon = "mdi:alert-outline"
     _unrecorded_attributes = frozenset({"steps", "daily"})
 
     def __init__(self, entry: JmaConfigEntry) -> None:
@@ -233,7 +230,6 @@ class WarningOutlookSensor(_CoordSensor):
 class TyphoonSensor(_CoordSensor):
     """Number of active tropical cyclones (0 is a valid state)."""
 
-    _attr_icon = "mdi:weather-hurricane"
     _unrecorded_attributes = frozenset({"storms"})
 
     def __init__(self, entry: JmaConfigEntry) -> None:
@@ -256,7 +252,6 @@ class WbgtSensor(_CoordSensor):
     No device class: WBGT is not an air temperature.
     """
 
-    _attr_icon = "mdi:sun-thermometer"
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_attribution = WBGT_ATTRIBUTION
@@ -294,7 +289,6 @@ class HeatAlertSensor(_CoordSensor):
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = ["none", "alert", "special"]
-    _attr_icon = "mdi:sun-thermometer-outline"
     _attr_attribution = WBGT_ATTRIBUTION
     _unrecorded_attributes = frozenset({"wbgt"})
 
@@ -342,7 +336,6 @@ class HeatAlertSensor(_CoordSensor):
 class KikikuruSensor(_CoordSensor):
     """キキクル (浸水・土砂・洪水) at the configured place, newest frame: max level 0-5."""
 
-    _attr_icon = "mdi:home-flood"
 
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "kikikuru", entry.runtime_data.layers)
@@ -402,7 +395,7 @@ class JapanSensor(_CoordSensor):
     """Nationwide city forecast, today + tomorrow; the state is JMA's newest report time."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_icon = "mdi:map-outline"
+    _attr_entity_registry_enabled_default = False  # 22 cities in one attribute: switch on when it is used
     _unrecorded_attributes = frozenset({"cities"})
 
     def __init__(self, entry: JmaConfigEntry) -> None:
@@ -425,7 +418,6 @@ class LastEarthquakeSensor(JmaEntity, SensorEntity):
     area_shindo, local_scale / local_shindo)."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_icon = "mdi:waveform"
     _attr_attribution = QUAKE_ATTRIBUTION
 
     def __init__(self, entry: JmaConfigEntry) -> None:
@@ -471,7 +463,6 @@ class TsunamiSensor(JmaEntity, SensorEntity):
     _attr_attribution = QUAKE_ATTRIBUTION  # P2P地震情報 relays the agency's tsunami information
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = list(TSUNAMI_GRADE_KEY)
-    _attr_icon = "mdi:tsunami"
     _unrecorded_attributes = frozenset({"areas_major", "areas_warning"})
 
     def __init__(self, entry: JmaConfigEntry) -> None:

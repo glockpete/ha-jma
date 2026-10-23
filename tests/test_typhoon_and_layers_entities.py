@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.jma.const import URL_TYPHOON_TARGET, URL_WBGT, WBGT_ATTRIBUTION
@@ -14,6 +15,7 @@ from .conftest import mock_jma, setup
 EVENING = "2026-09-27T14:30:00+00:00"  # an evening moment after the sample files were issued
 
 
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
 async def test_optional_entities_from_sample_files(tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:
     hass = tokyo
     freezer.move_to(EVENING)

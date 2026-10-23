@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -99,6 +100,7 @@ def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
 
 class FeedProblem(JmaEntity, BinarySensorEntity):
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC  # about the integration's own health, not the weather
 
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "feed_problem")

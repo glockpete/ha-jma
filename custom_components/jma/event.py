@@ -33,7 +33,6 @@ async def async_setup_entry(
 class JmaAlerts(JmaEntity, EventEntity):
     _attr_attribution = ALERTS_ATTRIBUTION
     _attr_event_types = list(EVENT_TYPES)
-    _attr_icon = "mdi:bullhorn"
 
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "alerts")

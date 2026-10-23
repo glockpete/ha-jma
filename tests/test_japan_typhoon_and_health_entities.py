@@ -8,6 +8,7 @@ import json
 from datetime import timedelta
 from types import SimpleNamespace
 
+import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
@@ -45,6 +46,7 @@ async def _tick(hass: HomeAssistant, freezer, delta: timedelta, times: int = 1) 
 
 # ---------- nationwide forecast ----------
 
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
 async def test_japan_sensor_from_fixture(tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:
     hass = tokyo
     freezer.move_to(JAPAN_NOW)
@@ -62,6 +64,7 @@ async def test_japan_sensor_from_fixture(tokyo: HomeAssistant, aioclient_mock, e
     assert "japan" not in hass.states.get("binary_sensor.jma_chiyoda_feed_problem").attributes
 
 
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
 async def test_japan_failing_is_not_a_feed_problem(tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:
     hass = tokyo
     freezer.move_to(EVENING)

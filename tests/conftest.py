@@ -92,6 +92,14 @@ def no_quake_socket() -> Generator[None]:
 
 
 @pytest.fixture
+def entity_registry_enabled_by_default() -> Generator[None]:
+    """Home Assistant core's fixture of the same name (its tests/conftest.py): entities that are off by
+    default (radar_frames, japan) are created enabled, so a test can read their state."""
+    with patch("homeassistant.helpers.entity.Entity.entity_registry_enabled_default", return_value=True):
+        yield
+
+
+@pytest.fixture
 async def tokyo(hass: HomeAssistant, freezer) -> HomeAssistant:
     freezer.move_to(NOW)
     hass.config.latitude = LAT

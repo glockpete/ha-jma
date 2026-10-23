@@ -129,6 +129,7 @@ async def test_the_weather_credit_has_the_link_open_meteo_asks_for(tokyo: HomeAs
     assert JMA_ATTRIBUTION in credit and "CC BY 4.0" in credit and "converted" in credit
 
 
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
 async def test_every_entity_that_shows_agency_data_carries_the_credit(tokyo: HomeAssistant, aioclient_mock, entry) -> None:
     """The agency's terms ask for the source and, for edited content, a statement that it was edited."""
     mock_jma(aioclient_mock)
@@ -144,6 +145,7 @@ async def test_every_entity_that_shows_agency_data_carries_the_credit(tokyo: Hom
     assert "加工" in JMA_ATTRIBUTION and "https://www.jma.go.jp/" in JMA_ATTRIBUTION
 
 
+@pytest.mark.usefixtures("entity_registry_enabled_by_default")
 async def test_entities_from_sample_files(tokyo: HomeAssistant, aioclient_mock, entry) -> None:
     hass = tokyo
     mock_jma(aioclient_mock)
