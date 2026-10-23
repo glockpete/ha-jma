@@ -34,12 +34,12 @@ def _log_once(key: str, message: str, *args: Any) -> None:
         _LOGGER.warning(message, *args)
 
 
-def _wrap(part: dict) -> dict:
+def _wrap(part: dict[str, Any]) -> dict[str, Any]:
     areas = part.get("areas")
     return {**part, "areas": [areas]} if isinstance(areas, dict) else part
 
 
-def _listify(block: dict) -> dict:
+def _listify(block: dict[str, Any]) -> dict[str, Any]:
     """Shallow copy of an srf / week block with each `areas` object wrapped in a list."""
     out = {**block, "timeSeries": [_wrap(ts) for ts in block["timeSeries"]]}
     for key in ("tempAverage", "precipAverage"):
@@ -52,7 +52,7 @@ def _int(value: float | None) -> int | None:
     return None if value is None else int(round(value))
 
 
-def _city(office: dict, today: date) -> tuple[dict[str, Any], datetime]:
+def _city(office: dict[str, Any], today: date) -> tuple[dict[str, Any], datetime]:
     name_en, lat, lon = JAPAN_CITIES[office["officeCode"]]
     blocks = [_listify(office["srf"])]
     if isinstance(office.get("week"), dict):

@@ -54,7 +54,7 @@ def _hours(duration: Any) -> int:
     return int(m.group(1))
 
 
-def _land_locals(locals_: list[dict]) -> list[dict]:
+def _land_locals(locals_: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The configured place is on land: drop 海上 locals unless nothing else is there."""
     land = [loc for loc in locals_ if loc.get("areaName") != TIMELINE_SEA_LOCAL]
     return land or locals_
@@ -81,14 +81,14 @@ class WarningOutlook:
     peak: dict[str, Any] | None
 
 
-def _area_kinds(series: dict, area: str) -> list[dict] | None:
+def _area_kinds(series: dict[str, Any], area: str) -> list[dict[str, Any]] | None:
     for item in series.get("class20Items") or []:
         if item.get("areaCode") == area:
             return item.get("kinds") or []
     return None
 
 
-def _levels_per_step(kinds: list[dict], n: int) -> list[dict[str, int]]:
+def _levels_per_step(kinds: list[dict[str, Any]], n: int) -> list[dict[str, int]]:
     out: list[dict[str, int]] = [{} for _ in range(n)]
     for kind in kinds:
         for part in kind.get("significancyParts") or []:
@@ -101,7 +101,7 @@ def _levels_per_step(kinds: list[dict], n: int) -> list[dict[str, int]]:
     return out
 
 
-def _values_per_step(kinds: list[dict], n: int) -> list[dict[str, Any]]:
+def _values_per_step(kinds: list[dict[str, Any]], n: int) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = [{field: None for field in TIMELINE_VALUES.values()} for _ in range(n)]
     for kind in kinds:
         for part in kind.get("forecastParts") or []:

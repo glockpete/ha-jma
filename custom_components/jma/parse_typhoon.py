@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypeVar
 
 from .const import (
     EARTH_RADIUS_KM,
@@ -28,6 +29,7 @@ from .const import (
 )
 from .errors import JmaParseError
 
+T = TypeVar("T")
 _JST = timezone(timedelta(hours=9))
 _ZONE_SAMPLES = 50  # f = 0, 0.02 ... 1 on every leg between two storm-zone circles
 
@@ -73,9 +75,9 @@ def closest_approach(now: dict[str, Any], track: list[dict[str, Any]],
     """
     if not track:
         return None
-    points = [{"hours": 0, "time": now.get("time"), "lat": now["lat"], "lon": now["lon"],
+    points: list[dict[str, Any]] = [{"hours": 0, "time": now.get("time"), "lat": now["lat"], "lon": now["lon"],
                "circle_km": 0}, *track]
-    best: tuple[float, dict, dict, float] | None = None
+    best: tuple[float, dict[str, Any], dict[str, Any], float] | None = None
     for a, b in zip(points, points[1:], strict=False):
         ax, ay = _plane(a["lat"], a["lon"], home)
         bx, by = _plane(b["lat"], b["lon"], home)
@@ -85,7 +87,9 @@ def closest_approach(now: dict[str, Any], track: list[dict[str, Any]],
         dist = math.hypot(ax + f * dx, ay + f * dy)
         if best is None or dist < best[0]:  # a tie keeps the earlier segment
             best = (dist, a, b, f)
-    _, a, b, f = best  # type: ignore[misc]  # track is not empty: at least one segment
+    if best is None:  # not reachable: track is not empty, so there is at least one segment
+        return None
+    _, a, b, f = best
     if f < _AT_CENTRE:
         f = 0.0
     elif f > 1 - _AT_CENTRE:
@@ -105,7 +109,7 @@ def closest_approach(now: dict[str, Any], track: list[dict[str, Any]],
     }
 
 
-def thin(points: list, limit: int) -> list:
+def thin(points: list[T], limit: int) -> list[T]:
     """At most `limit` points, evenly spaced, always keeping the first and the last."""
     if len(points) <= limit:
         return list(points)
@@ -204,11 +208,11 @@ def _circle_km(radius_m: Any) -> float | None:
     return round(km, 1) if math.isfinite(km) and 0 <= km <= _MAX_RADIUS_KM else None
 
 
-def _parts(data: Any, what: str) -> tuple[dict, dict[int, dict]]:
+def _parts(data: Any, what: str) -> tuple[dict[str, Any], dict[int, dict[str, Any]]]:
     if not isinstance(data, list) or not data:
         raise JmaParseError(f"typhoon {what}: not a list of parts")
-    title: dict = {}
-    by_hour: dict[int, dict] = {}
+    title: dict[str, Any] = {}
+    by_hour: dict[int, dict[str, Any]] = {}
     for part in data:
         if not isinstance(part, dict):
             continue
@@ -221,7 +225,7 @@ def _parts(data: Any, what: str) -> tuple[dict, dict[int, dict]]:
     return title, by_hour
 
 
-def storm_zone_steps(fparts: dict[int, dict]) -> list[dict[str, Any]]:
+def storm_zone_steps(fparts: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     """The 暴風警戒域 circle each forecast step adds (JMA `stormWarningArea.arc`, radii in metres).
 
     A step's arcs repeat the arcs of every earlier step, so its OWN circle is the (centre, radius)
@@ -257,7 +261,7 @@ def storm_zone_steps(fparts: dict[int, dict]) -> list[dict[str, Any]]:
     return steps
 
 
-def _zone_discs(steps: list[dict[str, Any]]):
+def _zone_discs(steps: list[dict[str, Any]]) -> Iterator[tuple[float, str | None, float, float, float]]:
     """The sampled discs of the zone in time order: the convex hull of two circles is the union of
     the linearly interpolated discs, so each leg A -> B is sampled at f = 0, 0.02 ... 1."""
     if len(steps) == 1:

@@ -17,7 +17,7 @@ announces the alert again, which is the right way round.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TypedDict
 
 from homeassistant.core import CALLBACK_TYPE, CoreState, HomeAssistant, callback
 from homeassistant.helpers.start import async_at_started
@@ -31,7 +31,15 @@ SAVE_DELAY_S = 2
 _SCALARS = (str, int, float, bool, type(None))
 
 
-def empty_memory() -> dict[str, Any]:
+class MemoryData(TypedDict):
+    """The stored file: one section per tracker."""
+
+    typhoon: dict[str, Any]
+    heat: list[str]
+    tsunami: dict[str, Any]
+
+
+def empty_memory() -> MemoryData:
     return {"typhoon": {}, "heat": [], "tsunami": {}}
 
 
@@ -75,8 +83,8 @@ class AlertMemory:
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._hass = hass
-        self._store: Store[dict[str, Any]] = Store(hass, STORE_VERSION, f"jma.{entry_id}.alert_memory")
-        self.data: dict[str, Any] = empty_memory()
+        self._store: Store[MemoryData] = Store(hass, STORE_VERSION, f"jma.{entry_id}.alert_memory")
+        self.data: MemoryData = empty_memory()
         # `hass.is_running` is also true while STARTING; the event entity delivers only once the
         # state is RUNNING (async_at_started), so that is the state that counts here too.
         self._running = hass.state is CoreState.running
@@ -97,16 +105,17 @@ class AlertMemory:
     async def async_load(self) -> None:
         """A missing or damaged file is an empty memory: the worst case is one repeated alert.
         Entries of the wrong shape are dropped one by one, never raised later inside a poll."""
+        stored: object  # the file on disk can hold anything: the typed shape is only what is written back
         try:
             stored = await self._store.async_load()
         except Exception:  # noqa: BLE001 - never block setup on this file
             _LOGGER.warning("alert memory could not be read; starting empty", exc_info=True)
             stored = None
-        stored = stored if isinstance(stored, dict) else {}
+        sections: dict[str, Any] = stored if isinstance(stored, dict) else {}
         self.data = {
-            "typhoon": _clean_typhoon(stored.get("typhoon")),
-            "heat": _clean_heat(stored.get("heat")),
-            "tsunami": _clean_tsunami(stored.get("tsunami")),
+            "typhoon": _clean_typhoon(sections.get("typhoon")),
+            "heat": _clean_heat(sections.get("heat")),
+            "tsunami": _clean_tsunami(sections.get("tsunami")),
         }
 
     @callback
@@ -129,7 +138,7 @@ class AlertMemory:
     def _write(self) -> None:
         self._store.async_delay_save(self._data_to_save, SAVE_DELAY_S)
 
-    def _data_to_save(self) -> dict[str, Any]:
+    def _data_to_save(self) -> MemoryData:
         self._unsaved = False
         return self.data
 

@@ -116,9 +116,9 @@ def _int(value: Any) -> int | None:
     return None if number is None else int(number)
 
 
-def _row(series: dict, code: str) -> dict:
+def _row(series: dict[str, Any], code: str) -> dict[str, Any]:
     """The area row with this code, else the first row (offices name their areas differently)."""
-    areas = series["areas"]
+    areas: list[dict[str, Any]] = series["areas"]
     for area in areas:
         if area["area"]["code"] == code:
             return area

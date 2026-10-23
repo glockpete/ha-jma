@@ -64,6 +64,12 @@ def test_merge_takes_pressure_from_secondary():
     assert merge_observations(None, None).temperature is None
 
 
+def test_merge_with_only_the_secondary_station_returns_it_unchanged():
+    secondary = parse_point(load_json("point_44132_12.json"), "44132")
+    assert merge_observations(None, secondary) == secondary
+    assert merge_observations(secondary, None) == secondary
+
+
 def test_bad_point_file():
     with pytest.raises(JmaParseError):
         parse_point("<html>", "62016")

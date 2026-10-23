@@ -10,7 +10,7 @@ import asyncio
 import csv
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -84,6 +84,7 @@ from .parse_amedas import (
 from .parse_forecast import ForecastData, parse_forecast, parse_overview
 from .parse_heat_alert import (
     HEAT_ALERT_NON_ALERT_STATUSES,
+    HeatAlertBulletin,
     expected_files,
     file_status,
     in_season,
@@ -125,6 +126,7 @@ from .parse_warnings import (
     stale_bulletins,
     suspect_reason,
 )
+from .parse_warnings import Warning as AreaWarning
 from .parse_wbgt import WbgtForecast, parse_wbgt
 
 if TYPE_CHECKING:
@@ -132,6 +134,8 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 T = TypeVar("T")
+# Raised alerts: (event type, payload) to the event entity.
+type FireCallback = Callable[[str, dict[str, Any]], None]
 
 
 def _first(items: list[T], limit: int, what: str) -> list[T]:
@@ -143,7 +147,7 @@ def _first(items: list[T], limit: int, what: str) -> list[T]:
     return items
 
 
-async def _limited(sem: asyncio.Semaphore, request: Callable[..., Any], *args: Any) -> Any:
+async def _limited(sem: asyncio.Semaphore, request: Callable[..., Awaitable[T]], *args: Any) -> T:
     """One request of a fan-out; the poll's semaphore keeps at most TILE_MAX_INFLIGHT of them in flight."""
     async with sem:
         return await request(*args)
@@ -174,9 +178,11 @@ class JmaConfig:
 class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
     """Keeps the last good data through short outages."""
 
+    config_entry: JmaConfigEntry
+
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, api: JmaApi, cfg: JmaConfig,
-        name: str, interval,
+        self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig,
+        name: str, interval: timedelta,
     ) -> None:
         super().__init__(hass, _LOGGER, config_entry=entry, name=f"jma {name}",
                          update_interval=interval)
@@ -224,12 +230,12 @@ class AlertEmitter:
     `_pending` until set_alerts_ready() (called from async_setup_entry once they are set up).
     """
 
-    _fire: Callable[[str, dict], None]
+    _fire: FireCallback
 
-    def _init_emitter(self, fire: Callable[[str, dict], None]) -> None:
+    def _init_emitter(self, fire: FireCallback) -> None:
         self._fire = fire
         self._alerts_ready = False
-        self._pending: list[tuple[str, dict]] = []
+        self._pending: list[tuple[str, dict[str, Any]]] = []
 
     def set_alerts_ready(self) -> None:
         self._alerts_ready = True
@@ -237,7 +243,7 @@ class AlertEmitter:
         for event_type, data in pending:
             self._fire(event_type, data)
 
-    def _emit(self, event_type: str, data: dict) -> None:
+    def _emit(self, event_type: str, data: dict[str, Any]) -> None:
         if self._alerts_ready:
             self._fire(event_type, data)
         else:
@@ -254,7 +260,7 @@ class ForecastBundle:
 
 
 class ForecastCoordinator(_JmaCoordinator[ForecastBundle]):
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "forecast", INTERVAL_FORECAST)
 
     async def _fetch(self) -> ForecastBundle:
@@ -272,7 +278,7 @@ class ForecastCoordinator(_JmaCoordinator[ForecastBundle]):
 # ---------- hourly (Open-Meteo JMA MSM) ----------
 
 class HourlyCoordinator(_JmaCoordinator[list[dict[str, Any]]]):
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "hourly", INTERVAL_HOURLY)
 
     async def _fetch(self) -> list[dict[str, Any]]:
@@ -284,7 +290,7 @@ class HourlyCoordinator(_JmaCoordinator[list[dict[str, Any]]]):
 # ---------- AMeDAS ----------
 
 class AmedasCoordinator(_JmaCoordinator[Observation]):
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "amedas", INTERVAL_AMEDAS)
         # Per station: the other one fills every value, so one station can be down for days
         # unseen; feed health reads these (reason `amedas_station`).
@@ -334,10 +340,11 @@ class WarningsState:
 
 
 class WarningsCoordinator(AlertEmitter, _JmaCoordinator[WarningsState]):
-    def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None]) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig,
+                 fire: FireCallback) -> None:
         super().__init__(hass, entry, api, cfg, "warnings", INTERVAL_WARNINGS)
         self._init_emitter(fire)
-        self._prev: list | None = None
+        self._prev: list[AreaWarning] | None = None
         self._prev_control: dict[str, str] | None = None
         self._suspect_polls = 0
         self._stale: list[str] = []
@@ -382,7 +389,7 @@ class WarningsCoordinator(AlertEmitter, _JmaCoordinator[WarningsState]):
             "name_en": w.name_en,
             "status": w.status,
             "area": self.cfg.area_name,
-            "headline": area.headlines.get(w.data_type) or area.headline,
+            "headline": (area.headlines.get(w.data_type) if w.data_type is not None else None) or area.headline,
             "report_time": w.report_time,
         }
 
@@ -420,7 +427,8 @@ class NowcastState:
 
 
 class NowcastCoordinator(_JmaCoordinator[NowcastState]):
-    def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None]) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig,
+                 fire: FireCallback) -> None:
         super().__init__(hass, entry, api, cfg, "nowcast", INTERVAL_NOWCAST)
         self._fire = fire
         self._tile = tile_for(cfg.latitude, cfg.longitude, NOWCAST_ZOOM)
@@ -475,7 +483,7 @@ class NowcastCoordinator(_JmaCoordinator[NowcastState]):
 class WarningOutlookCoordinator(_JmaCoordinator[WarningOutlook]):
     """3-hourly warning-risk outlook for the area (危険度の時系列)."""
 
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "warning outlook", INTERVAL_TIMELINE)
 
     async def _fetch(self) -> WarningOutlook:
@@ -497,7 +505,8 @@ class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
     "name_en", "name_ja"}}), `save` persists it.
     """
 
-    def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None] | None = None,
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig,
+                 fire: FireCallback | None = None,
                  memory: dict[str, Any] | None = None, save: Callable[[], None] | None = None) -> None:
         super().__init__(hass, entry, api, cfg, "typhoon", INTERVAL_TYPHOON)
         self._init_emitter(fire or (lambda _type, _data: None))
@@ -582,7 +591,7 @@ _JST = timezone(timedelta(hours=9))
 class WbgtCoordinator(_JmaCoordinator[WbgtState]):
     """環境省 WBGT forecast. "No data" is a quiet, successful poll (debug log only)."""
 
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "wbgt", INTERVAL_WBGT)
 
     async def _fetch(self) -> WbgtState:
@@ -608,7 +617,7 @@ class HeatAlertState:
     """bulletin: the newest parsed file (parse_heat_alert.HeatAlertBulletin) or None: out of
     season, not published yet, a drill/test file, or the office has no row."""
 
-    bulletin: Any | None
+    bulletin: HeatAlertBulletin | None
 
 
 class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
@@ -620,13 +629,14 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
 
     MAX_REQUESTS = 2  # files requested per poll (the newest, then one fallback)
 
-    def __init__(self, hass, entry, api, cfg, fire: Callable[[str, dict], None] | None = None,
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig,
+                 fire: FireCallback | None = None,
                  memory: list[str] | None = None, save: Callable[[], None] | None = None) -> None:
         super().__init__(hass, entry, api, cfg, "heat alert", INTERVAL_HEAT_ALERT)
         self._init_emitter(fire or (lambda _type, _data: None))
         self._memory: list[str] = memory if memory is not None else []
         self._save: Callable[[], None] = save or (lambda: None)
-        self._held: tuple[tuple[date, int], Any] | None = None  # (issue date, hour), bulletin
+        self._held: tuple[tuple[date, int], HeatAlertBulletin] | None = None  # (issue date, hour), bulletin
         self._missing: dict[tuple[date, int], datetime] = {}  # name -> when it answered 404 / unusable
         self._warned: set[tuple[date, int]] = set()  # unusable files already logged at WARNING
         # AMeDAS station NAMES (primary, secondary) as the CSV writes them. __init__ sets it after
@@ -655,7 +665,7 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
         if not self.station_names:
             await self._load_station_names()
         held_name = self._held[0] if self._held else None
-        found: tuple[tuple[date, int], Any] | None = None
+        found: tuple[tuple[date, int], HeatAlertBulletin] | None = None
         requests = 0
         for i, name in enumerate(expected_files(now)):
             if name == held_name:
@@ -695,7 +705,7 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
                 self._save()
         return HeatAlertState(self._held[1] if self._held else None)
 
-    def _warn_future(self, name: tuple[date, int], bulletin: Any) -> None:
+    def _warn_future(self, name: tuple[date, int], bulletin: HeatAlertBulletin) -> None:
         """Once per file name, like _log_unusable."""
         if name not in self._warned:
             self._warned.add(name)
@@ -718,7 +728,7 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
 class JapanCoordinator(_JmaCoordinator[JapanForecast]):
     """Nationwide city forecast, today + tomorrow. Optional: not in feed health."""
 
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "japan", INTERVAL_JAPAN)
 
     async def _fetch(self) -> JapanForecast:
@@ -733,7 +743,7 @@ class LayersState:
     rain_outlook: RainOutlook | None
 
 
-def _n3_layers(data: Any) -> dict[str, list]:
+def _n3_layers(data: Any) -> dict[str, list[dict[str, str]]]:
     # liden rides on the same N3 file: no extra request.
     return {"thns": n3_frames(data, "thns"), "trns": n3_frames(data, "trns"),
             "liden": liden_frames(data)}
@@ -753,10 +763,11 @@ class LayersCoordinator(_JmaCoordinator[LayersState]):
         "himawari": (URL_HIMAWARI_TIMES, himawari_frames),
     }
 
-    def __init__(self, hass, entry, api, cfg) -> None:
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "layers", INTERVAL_LAYERS)
         max_age = INTERVAL_LAYERS * STALE_FACTOR
-        self.sources: dict[str, LastGood] = {k: LastGood(max_age) for k in self.SOURCES}
+        # The four sources hold different shapes of frame list (see SOURCES), so the value type is open.
+        self.sources: dict[str, LastGood[Any]] = {k: LastGood(max_age) for k in self.SOURCES}
         self._kikikuru: LastGood[Kikikuru] = LastGood(max_age)
         self._rain: LastGood[RainOutlook] = LastGood(max_age)
         self._tile = tile_for(cfg.latitude, cfg.longitude, LAYERS_ZOOM)
@@ -875,7 +886,7 @@ class JmaRuntime:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
-    def coordinators(self) -> list[_JmaCoordinator]:
+    def coordinators(self) -> list[_JmaCoordinator[Any]]:
         return [
             self.forecast, self.hourly, self.amedas, self.warnings, self.nowcast,
             self.timeline, self.typhoon, self.wbgt, self.layers, self.japan, self.heat_alert,
@@ -891,10 +902,10 @@ class JmaRuntime:
 type JmaConfigEntry = ConfigEntry[JmaRuntime]
 
 
-def make_fire(hass: HomeAssistant, entry_id: str) -> Callable[[str, dict], None]:
+def make_fire(hass: HomeAssistant, entry_id: str) -> FireCallback:
     """Alerts go to the event entity through the dispatcher."""
 
-    def fire(event_type: str, data: dict) -> None:
+    def fire(event_type: str, data: dict[str, Any]) -> None:
         async_dispatcher_send(hass, signal_alert(entry_id), event_type, data)
 
     return fire

@@ -278,6 +278,8 @@ class TsunamiTracker:
         TSUNAMI_MAX_AGE before the bulletin now being judged (or unreadable). Measured against the
         bulletin, not the wall clock, so the expiry of the bulletin itself still reports once."""
         raw = self.memory.get("issued")
+        if not isinstance(raw, str):  # fromisoformat would raise TypeError for it, which is the same answer
+            return True
         try:
             issued = datetime.fromisoformat(raw)
             return bulletin.issued - issued > TSUNAMI_MAX_AGE

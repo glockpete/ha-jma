@@ -6,6 +6,7 @@ Pure: the binary sensor feeds it conditions; it remembers since when each one ha
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from .const import HEALTH_GRACE
 
@@ -18,12 +19,12 @@ class HealthTracker:
         self._since: dict[str, datetime] = {}
         self._reason: dict[str, str] = {}
 
-    def evaluate(self, now: datetime, conditions: dict[str, str | None]) -> dict[str, dict]:
+    def evaluate(self, now: datetime, conditions: dict[str, str | None]) -> dict[str, dict[str, Any]]:
         """conditions: feed -> reason string when unhealthy, None when fine.
 
         Returns feed -> {problem: bool, since, reason} for every feed.
         """
-        out: dict[str, dict] = {}
+        out: dict[str, dict[str, Any]] = {}
         for feed, reason in conditions.items():
             if reason is None:
                 self._since.pop(feed, None)

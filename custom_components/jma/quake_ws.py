@@ -55,7 +55,7 @@ class QuakeClient:
     def __init__(
         self,
         api: JmaApi,
-        fire: Callable[[str, dict], None],
+        fire: Callable[[str, dict[str, Any]], None],
         on_quake: Callable[[], None],
         place: QuakePlace,
         memory: dict[str, Any] | None = None,

@@ -10,7 +10,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass, fields, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypeGuard
 
 from .errors import JmaParseError
 
@@ -99,12 +99,17 @@ def _reading(value: Any) -> bool:
         return False
 
 
+def _whole(value: Any) -> TypeGuard[int]:
+    """An int that is not a bool (JSON true / false are ints to isinstance)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def extreme_time(row_time: datetime, hm: Any) -> datetime | None:
     """A {hour, minute} UTC time-of-day inside the JST day of `row_time`, as a JST datetime."""
     if not isinstance(hm, dict):
         return None
     hour, minute = hm.get("hour"), hm.get("minute")
-    if not all(isinstance(v, int) and not isinstance(v, bool) for v in (hour, minute)):
+    if not (_whole(hour) and _whole(minute)):
         return None
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         return None
@@ -156,7 +161,7 @@ def merge_observations(primary: Observation | None, secondary: Observation | Non
     if primary is None and secondary is None:
         return Observation()
     if primary is None:
-        return secondary  # type: ignore[return-value]
+        return secondary if secondary is not None else Observation()
     if secondary is None:
         return primary
     merged = {

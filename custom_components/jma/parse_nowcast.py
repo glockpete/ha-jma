@@ -87,7 +87,14 @@ def tile_block(png: bytes, px: int, py: int, radius: int, what: str) -> list[tup
             block = img.crop(box).convert("RGBA")
         except Exception as err:  # a truncated or corrupt stream
             raise JmaParseError(f"{what}: {err!r}") from err
-        return [block.getpixel((x, y)) for y in range(block.height) for x in range(block.width)]  # type: ignore[misc]
+        pixels: list[tuple[int, int, int, int]] = []
+        for y in range(block.height):
+            for x in range(block.width):
+                pixel = block.getpixel((x, y))  # Pillow types this float | tuple | None; an RGBA block gives 4-tuples
+                if not isinstance(pixel, tuple) or len(pixel) != 4:
+                    raise JmaParseError(f"{what}: unexpected pixel {pixel!r}")
+                pixels.append(pixel)
+        return pixels
 
 
 def band_at(png: bytes, px: int, py: int, radius: int = 2) -> int:
@@ -197,7 +204,7 @@ class WetHold:
 def rain_series(basetime: str, frames: list[tuple[str, int | None]]) -> RainSummary:
     """frames: (validtime, band or None if the tile could not be read), observed frame first."""
     base = parse_jma_time(basetime)
-    series = []
+    series: list[dict[str, Any]] = []
     for validtime, band in frames:
         when = parse_jma_time(validtime)
         series.append({
@@ -206,9 +213,9 @@ def rain_series(basetime: str, frames: list[tuple[str, int | None]]) -> RainSumm
             "band": band,
             "mmh_upper": None if band is None else BAND_MMH[band][1],
         })
-    known = [s["band"] for s in series if s["band"] is not None]
+    known: list[int] = [s["band"] for s in series if s["band"] is not None]
     raining_now = bool(series) and (series[0]["band"] or 0) >= RAIN_BAND_RAIN
-    minutes = next(
+    minutes: int | None = next(
         (s["minutes"] for s in series[1:] if (s["band"] or 0) >= RAIN_BAND_RAIN), None
     )
     return RainSummary(

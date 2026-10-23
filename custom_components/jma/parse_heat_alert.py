@@ -15,6 +15,7 @@ import csv
 import io
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
+from typing import Any, TypedDict
 
 from .const import (
     HEAT_ALERT_GRADE,
@@ -149,6 +150,7 @@ def parse_heat_alert(text: str | None, office: str, stations: tuple[str, ...] = 
         return None
     cols = [c.strip() for c in row[_COL_WBGT_FIRST:_COL_WBGT_LAST + 1]]
     cols += [""] * (3 - len(cols))
+    wbgt_date: date | None
     if report_time.hour == 5:  # the 05:00 issue: figures for the day itself
         wbgt, wbgt_date = _wbgt(cols[2] or cols[1] or cols[0]), target1
     else:  # any other issue: the forecast for TargetDate2, never the 05:00 column
@@ -183,7 +185,13 @@ def _grade(bulletin: HeatAlertBulletin, day: date) -> str | None:
     return HEAT_ALERT_GRADE.get(flag, "none")
 
 
-def grades(bulletin: HeatAlertBulletin, today: date) -> dict:
+class Grades(TypedDict):
+    today: str | None
+    tomorrow: str | None
+    special_judged: bool
+
+
+def grades(bulletin: HeatAlertBulletin, today: date) -> Grades:
     """{"today": g, "tomorrow": g, "special_judged": bool}; a date's grade comes from whichever
     target column equals it (flag 2 = judged, not issued, is "none" with special_judged set)."""
     return {
@@ -193,10 +201,10 @@ def grades(bulletin: HeatAlertBulletin, today: date) -> dict:
     }
 
 
-def new_alerts(bulletin: HeatAlertBulletin, today: date, memory: list[str]) -> list[dict]:
+def new_alerts(bulletin: HeatAlertBulletin, today: date, memory: list[str]) -> list[dict[str, Any]]:
     """One `heat_alert` payload per (target date, grade, day) not announced yet. `memory` (the
     "heat" list) gets the new keys appended in place and is trimmed to HEAT_ALERT_MEMORY_MAX."""
-    events = []
+    events: list[dict[str, Any]] = []
     for target, flag, day in (
         (bulletin.target1, bulletin.flag1, "today" if bulletin.target1 == today else None),
         (bulletin.target2, bulletin.flag2,

@@ -52,7 +52,7 @@ RISK_LAYERS: dict[str, str] = {"risk_inund": "inund", "risk_land": "land", "risk
 
 # ---------- frame selection ----------
 
-def _rows(data: Any, what: str) -> list[dict]:
+def _rows(data: Any, what: str) -> list[dict[str, Any]]:
     if not isinstance(data, list):
         raise JmaParseError(f"{what} targetTimes: not a list")
     try:
@@ -85,8 +85,8 @@ def liden_frames(data: Any, count: int = LIDEN_FRAMES) -> list[dict[str, str]]:
     return [{"basetime": v, "validtime": v} for v in times[-count:]] if count > 0 else []
 
 
-def _newest_per_validtime(rows: list[dict]) -> dict[str, dict]:
-    best: dict[str, dict] = {}
+def _newest_per_validtime(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    best: dict[str, dict[str, Any]] = {}
     for r in rows:
         v = r["validtime"]
         if v not in best or r["basetime"] > best[v]["basetime"]:
@@ -141,10 +141,10 @@ def himawari_frames(data: Any, count: int = HIMAWARI_FRAMES,
 
 
 def layers_attribute(
-    n3: dict[str, list] | None = None,
-    risk: list | None = None,
-    rasrf: tuple[str, list] | None = None,
-    himawari: list | None = None,
+    n3: dict[str, list[dict[str, str]]] | None = None,
+    risk: list[dict[str, str]] | None = None,
+    rasrf: tuple[str, list[dict[str, str]]] | None = None,
+    himawari: list[dict[str, str]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """The `layers` attribute. A source that is None (failed and too old) is left out; the static
     GSI flood-depth layer is always there. Templates keep every placeholder."""
@@ -244,7 +244,7 @@ class RainOutlook:
 
 def rain_outlook(basetime: str, frames: list[tuple[str, int | None]]) -> RainOutlook:
     """frames: (validtime, band or None if the tile could not be read), ascending."""
-    series = [
+    series: list[dict[str, Any]] = [
         {
             "time": parse_jma_time(v).isoformat(),
             "band": band,
@@ -252,8 +252,8 @@ def rain_outlook(basetime: str, frames: list[tuple[str, int | None]]) -> RainOut
         }
         for v, band in frames
     ]
-    known = [s["band"] for s in series if s["band"] is not None]
-    first = next((s["time"] for s in series if (s["band"] or 0) >= RAIN_BAND_RAIN), None)
+    known: list[int] = [s["band"] for s in series if s["band"] is not None]
+    first: str | None = next((s["time"] for s in series if (s["band"] or 0) >= RAIN_BAND_RAIN), None)
     return RainOutlook(
         basetime=basetime,
         series=series,

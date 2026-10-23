@@ -14,3 +14,11 @@ ignore = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["custom_components"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unreachable = true
+files = ["custom_components/jma"]
+plugins = []
+# No [[tool.mypy.overrides]]: every third-party import (homeassistant, aiohttp, PIL, voluptuous) ships its own types.
