@@ -15,8 +15,9 @@
 Weather forecasts, warnings, rain radar, typhoons, earthquakes, tsunami information and heat-stroke alerts for
 **any place in Japan**, in Home Assistant.
 
-The data comes from the public files of 気象庁 (the Japan Meteorological Agency, JMA) and a few partner services.
-You need no account and no API key.
+The integration connects Home Assistant to the public files of
+[気象庁 (the Japan Meteorological Agency, JMA)](https://www.jma.go.jp/) and to a few partner services. They are
+listed in [Data sources and attribution](#data-sources-and-attribution). You need no account and no API key.
 
 > **Important.** This is a community project. JMA did not make it, does not endorse it and does not support it.
 > **Do not use it for evacuation or safety decisions, and do not rely on it as your only way to learn of a
@@ -36,11 +37,20 @@ You need no account and no API key.
 - [Features](#features)
 - [Install](#install)
 - [Set up](#set-up)
+  - [What the dialogs ask](#what-the-dialogs-ask)
+  - [Names and entity ids](#names-and-entity-ids)
+  - [Options](#options)
+  - [Reconfigure](#reconfigure)
+  - [When the home moves](#when-the-home-moves)
+  - [When JMA cannot be reached](#when-jma-cannot-be-reached)
 - [Use it in automations](#use-it-in-automations)
 - [Entities](#entities)
+  - [Disabled and diagnostic entities](#disabled-and-diagnostic-entities)
 - [Events](#events)
 - [Earthquake values](#earthquake-values)
 - [Update intervals](#update-intervals)
+  - [How the feed-problem sensor judges a feed](#how-the-feed-problem-sensor-judges-a-feed)
+- [Repair issues](#repair-issues)
 - [Known limits](#known-limits)
 - [Data sources and attribution](#data-sources-and-attribution)
 - [Privacy](#privacy)
@@ -86,7 +96,8 @@ You need no account and no API key.
 - **Heat stroke.** The Ministry of the Environment's heat-stroke alerts (熱中症警戒アラート, heat-stroke alert, and
   熱中症特別警戒アラート, special heat-stroke alert), and the forecast heat index (WBGT,
   wet-bulb globe temperature) where it is available.
-- **Health.** A feed-problem sensor, and a diagnostics download that hides your location.
+- **Health.** A feed-problem sensor, repair issues for a missing earthquake connection or a silent weather station,
+  and a diagnostics download that hides your location.
 - Interface text in English and Japanese.
 
 ## Install
@@ -143,22 +154,152 @@ You can add more places the same way. Each municipality can be set up once.
 
 </details>
 
+### What the dialogs ask
+
+| Dialog | Field | Help text under the field |
+|---|---|---|
+| JMA forecast office | Forecast office (府県予報区) | The prefecture-level forecast office that publishes the forecast and warnings for your area. |
+| Warnings area | Ward / municipality for warnings (市区町村) | The ward or municipality the warnings are read for, from the list of that forecast office. |
+| Confirm | none | |
+
+The **Confirm** dialog says:
+
+> Warnings for 千代田区 (1310100).
+>
+> Observations: 東京 44132 (1.9 km), with 東京 44132 (1.9 km) for pressure and any missing values.
+
+Each station is shown as its name, its id and its distance from your home. The example is for a home at Tokyo
+Station (35.6812, 139.7671). There one station is both the nearest temperature station and the nearest type-A
+station, so it is named twice.
+
+A set-up can stop with one of these messages:
+
+| Message | Key | When |
+|---|---|---|
+| Could not reach the Japan Meteorological Agency's server. | `cannot_connect` | JMA's area list or station table could not be fetched, or was not in the shape the integration reads. |
+| This area is already set up. | `already_configured` | The municipality you chose already has an entry. |
+| A setup for this area is already in progress. | `already_in_progress` | Another set-up dialog for the same municipality is open. |
+
 ### Names and entity ids
 
-The entry is named **JMA** and the English name of the municipality, for example `JMA Chiyoda`. The entity ids
-follow that name, for example `weather.jma_chiyoda` and `sensor.jma_chiyoda_warning_level`. You can rename the
-entry in the UI.
+The entry is named **JMA** and the English name of the municipality without the word City, Ward, Town or Village,
+for example `JMA Chiyoda`. The entity ids follow that name, for example `weather.jma_chiyoda` and
+`sensor.jma_chiyoda_warning_level`. You can rename the entry in the UI.
+
+The name is chosen once, when you add the place. An entry that exists keeps its name, and
+[Reconfigure](#reconfigure) does not change it.
+
+**Two municipalities with one name.** In JMA's area list, 102 English names belong to more than one municipality
+(counted in the copy kept for the tests, `tests/fixtures/area.json`). Chuo, for example, is a ward of Tokyo and a
+city in Yamanashi. Two entries with the same title would get the same device name and entity ids ending in `_2`. So
+a shared name is followed by the forecast office in brackets:
+
+| Municipality | Title | Entity id of the weather entity |
+|---|---|---|
+| Chuo, Tokyo | `JMA Chuo (Tokyo)` | `weather.jma_chuo_tokyo` |
+| Chuo, Yamanashi | `JMA Chuo (Yamanashi)` | `weather.jma_chuo_yamanashi` |
+
+Two more rules:
+
+- **The biggest kind of place keeps the plain name** when every other municipality with that name is a smaller
+  kind (a city or ward is bigger than a town, and a town is bigger than a village). Chiyoda City stays
+  `JMA Chiyoda`, so the title people already have does not change. Chiyoda Town in Gunma becomes
+  `JMA Chiyoda (Gunma)`.
+- **The whole English name is used** where two places of one office still share the short name. Fuchu City and
+  Fuchu Town, both in Hiroshima, become `JMA Fuchu City (Hiroshima)` and `JMA Fuchu Town (Hiroshima)`.
 
 The entry also stores the Japanese name of the municipality as `area_name_ja`. The earthquake part uses it to
 match station addresses (see [Earthquake values](#earthquake-values)).
 
 ### Options
 
-Open the entry and select **Configure** to change:
+Open the entry (**Settings > Devices & services > JMA Weather (Unofficial)**) and select **Configure**. The dialog
+is titled **JMA options**. Each field starts with the value the entry uses now.
 
-- **The two station ids.** Each is five digits. The integration checks the format and accepts any AMeDAS station
-  id.
-- **Enable the jma.simulate test action.** See [Test your automations](#test-your-automations).
+| Field | Help text under the field |
+|---|---|
+| Primary AMeDAS station id | The nearest AMeDAS station that measures temperature; its readings come first. |
+| Secondary AMeDAS station id (type A) | The nearest type A station, used for pressure and for any value the primary station does not report. |
+| Enable the jma.simulate test action | Lets the jma.simulate action fire test alerts at this entry; leave it off in normal use. See [Test your automations](#test-your-automations). |
+
+What happens when you submit:
+
+1. Each station id is tidied. Spaces around it are removed. Full-width digits, as a Japanese input method types
+   them (`４４１３２`), become ASCII digits (Unicode form NFKC).
+2. The id must be five digits. If not, the field shows "An AMeDAS station id is five digits, for example 44071."
+   (`invalid_station`).
+3. The id is looked up in JMA's station table, <https://www.jma.go.jp/bosai/amedas/const/amedastable.json>. If it
+   is not there, the field shows "No AMeDAS station has this id in the agency's table. Check the id, for example
+   44071." (`unknown_station`).
+4. Both station fields can show an error at once. Nothing is saved until both are right, and what you typed stays
+   in the field.
+5. Saving reloads the entry when a setting changed, so the new stations apply.
+
+If JMA's station table cannot be fetched, or is not in the expected shape, the ids are accepted as typed after the
+five-digit check. JMA being down does not stop you from saving. A wrong id saved that way shows up later, as a
+silent station (see [Repair issues](#repair-issues)).
+
+A station id saved here replaces the station picked at set-up. [Reconfigure](#reconfigure) removes it again.
+
+### Reconfigure
+
+Use **Reconfigure** when a weather station has closed or changed its id, or when you want the nearest stations
+picked again.
+
+1. Go to **Settings > Devices & services > JMA Weather (Unofficial)**.
+2. Select the three dots of the entry and select **Reconfigure**.
+3. The dialog is titled **Pick the stations again**. It has no field. It says:
+
+   > Warnings stay for 千代田区 (1310100).
+   >
+   > The agency's tables now give: observations from 東京 44132 (1.9 km), with 東京 44132 (1.9 km) for pressure and
+   > any missing values.
+   >
+   > Submit to use these stations and refresh the area names. A station id typed under Configure is replaced.
+
+4. Submit.
+
+What it does:
+
+- It fetches JMA's area list and station table again and picks the two AMeDAS stations nearest to the home of
+  Home Assistant, the way set-up does.
+- It refreshes the area names stored in the entry. An entry made before 0.6 gains its Japanese area name this way.
+- The municipality and the entry title do not change. If you renamed the entry, the name stays.
+- A station id typed under Configure is dropped, so that the picked stations apply. The setting **Enable the
+  jma.simulate test action** stays as it was.
+- The entry reloads by itself if it is set up and a setting changed.
+
+It ends with one of these messages:
+
+| Message | Key | When |
+|---|---|---|
+| The stations and names were updated. | `reconfigure_successful` | Done. |
+| This entry does not belong to the area it was made for. Add the area again instead. | `unique_id_mismatch` | The unique id of the entry is not the area code stored in it. |
+| Could not reach the Japan Meteorological Agency's server. | `cannot_connect` | JMA's area list or station table could not be fetched, or was not in the expected shape. Nothing is changed. |
+
+### When the home moves
+
+The rain nowcast, the キキクル and rain-outlook values, the hourly forecast and the typhoon distance are read for
+the home location of Home Assistant. If you change the latitude or longitude in **Settings > System > General**, the
+entry reloads by itself and uses the new place. No restart is needed, and the rain tile follows. Saving the same
+place again, or changing something else in that dialog (units, time zone, name or elevation), does not reload it.
+
+The two weather stations are not picked again when the home moves. Run [Reconfigure](#reconfigure) for that.
+
+### When JMA cannot be reached
+
+When the entry starts, the integration asks the four main JMA feeds once: the daily forecast, the warnings, the
+AMeDAS observations and the rain nowcast. If none of the four can be fetched, the set-up is not completed. Home
+Assistant shows **Retrying setup** on the entry, with this text:
+
+> Could not reach the Japan Meteorological Agency's servers. Home Assistant will try again.
+
+No entities exist while it retries. Home Assistant tries again by itself, with longer and longer waits, and the
+entry sets up once a feed answers. You do not need to do anything. To try at once, reload the entry.
+
+These cases do not stop the set-up: at least one of the four feeds answers, a file arrives but does not parse, or an
+optional feed is down. The entry is set up, and each entity waits for its own feed. The other feeds and the
+earthquake connection start after this check.
 
 ### Where the lists come from
 
@@ -255,18 +396,20 @@ message that says so. A simulated event carries `simulated: true` in its data.
 
 ## Entities
 
-All entities of one place belong to one service device. In the entity ids below, `<place>` is the lower-case
-English name of the municipality, for example `chiyoda`.
+All entities of one place belong to one service device. The device page shows the version of the integration that
+is installed. In the entity ids below, `<place>` is the lower-case English name of the municipality, for example
+`chiyoda`. For a name that two municipalities share, it also holds the forecast office, for example `chuo_tokyo`
+(see [Names and entity ids](#names-and-entity-ids)).
 
 ### Weather and warnings
 
 | Entity | What it shows |
 |---|---|
 | `weather.jma_<place>` | Current conditions from the two AMeDAS stations and the rain nowcast. A daily forecast from JMA's forecast file, with JMA's weekly file for the later days. An hourly forecast from Open-Meteo (JMA's MSM model). |
-| `sensor.jma_<place>_warning_level` | The highest warning level in force for the municipality: 0 when nothing is in force, otherwise 2 to 5. The warnings themselves are in the attributes. |
+| `sensor.jma_<place>_warning_level` | The highest warning level in force for the municipality: 0 when nothing is in force, otherwise 2 to 5. The warnings themselves are in the attributes. The state is `unknown` when JMA's warnings file has no row for the municipality (the attribute `area_missing` is then `true`), because 0 would read as "nothing in force". |
 | `sensor.jma_<place>_warning_outlook` | The highest warning level that JMA's 3-hourly risk outlook expects for the municipality. |
 | `sensor.jma_<place>_overview` | JMA's text overview of the weather for the office, in Japanese. |
-| `sensor.jma_<place>_japan` | The nationwide city forecast (22 offices) for today and tomorrow. |
+| `sensor.jma_<place>_japan` | The nationwide city forecast (22 offices) for today and tomorrow. Disabled by default (see [Disabled and diagnostic entities](#disabled-and-diagnostic-entities)). |
 
 ### Rain and maps
 
@@ -275,7 +418,7 @@ English name of the municipality, for example `chiyoda`.
 | `sensor.jma_<place>_rain_next_hour` | The heaviest rain expected at your home location in the next 60 minutes, in mm/h, from the nowcast. The value is the upper bound of the nowcast's rain band. |
 | `sensor.jma_<place>_rain_outlook` | The heaviest rain expected at your home location after the nowcast hour, in mm/h. |
 | `sensor.jma_<place>_kikikuru` | The キキクル risk level at your home location, 0 to 5: the highest of the landslide, flood and inundation levels. |
-| `sensor.jma_<place>_radar_frames` | Frame lists and tile addresses for rain radar map cards, and for other layers: thunder and tornado nowcasts, lightning strikes, キキクル, the rain outlook, the Himawari satellite image and the hazard-map flood layer. JMA's frame lists send no CORS header, so a browser cannot read them directly; Home Assistant relays them. |
+| `sensor.jma_<place>_radar_frames` | Frame lists and tile addresses for rain radar map cards, and for other layers: thunder and tornado nowcasts, lightning strikes, キキクル, the rain outlook, the Himawari satellite image and the hazard-map flood layer. JMA's frame lists send no CORS header, so a browser cannot read them directly; Home Assistant relays them. Disabled by default (see [Disabled and diagnostic entities](#disabled-and-diagnostic-entities)). |
 
 ### Storms and heat
 
@@ -292,12 +435,33 @@ English name of the municipality, for example `chiyoda`.
 | `sensor.jma_<place>_last_earthquake` | The origin time of the newest earthquake reported, with its intensity in your prefecture and at your municipality. The attributes are described in [Earthquake values](#earthquake-values). |
 | `sensor.jma_<place>_tsunami` | The tsunami grade for your coast area: `none`, `watch`, `warning` or `major_warning`. The attributes give the strongest grade anywhere in Japan, the areas under a warning, and, for your coast area, the expected height and arrival time. Only some places have a coast area (see [Known limits](#known-limits)). |
 
+**When the earthquake connection is down.** `sensor.jma_<place>_last_earthquake` and `sensor.jma_<place>_tsunami`
+get their data only from the P2P地震情報 connection. When that connection has been down for more than 10 minutes,
+both become `unavailable`. This is the limit the feed-problem sensor uses. A shorter drop changes nothing. Both are
+available again when the connection is back. A place without a connection (see [Known limits](#known-limits)) has
+them `unavailable` all the time. The alerts event entity stays available, because some of its events come from the
+polling feeds.
+
 ### Alerts and status
 
 | Entity | What it shows |
 |---|---|
 | `event.jma_<place>_alerts` | The alerts an automation can react to (see [Events](#events)). |
-| `binary_sensor.jma_<place>_feed_problem` | On when a main feed has been failing for 30 minutes. The attributes name the feed and the reason (see [Troubleshooting](#troubleshooting)). |
+| `binary_sensor.jma_<place>_feed_problem` | On when a main feed has been failing for 30 minutes. The attributes name the feed and the reason (see [How the feed-problem sensor judges a feed](#how-the-feed-problem-sensor-judges-a-feed) and [Troubleshooting](#troubleshooting)). A diagnostic entity. |
+
+### Disabled and diagnostic entities
+
+- **`binary_sensor.jma_<place>_feed_problem` is a diagnostic entity.** It is about the health of the integration,
+  not about the weather. The device page lists it under **Diagnostic**.
+- **`sensor.jma_<place>_radar_frames` and `sensor.jma_<place>_japan` are disabled by default.** The first holds
+  frame lists for map cards. The second holds 22 cities in one attribute. A place you add is created without them.
+  A place you added before keeps them as they were.
+
+To enable one of them:
+
+1. Open the entity from the device page or from **Settings > Devices & services > Entities**.
+2. Select the settings (the cog), switch on **Enabled** and select **Update**.
+3. Home Assistant sets the entity up after a short delay.
 
 ## Events
 
@@ -417,10 +581,64 @@ The sensor also has `connected`: whether the connection to P2P地震情報 is op
 | Hourly forecast (Open-Meteo) | 60 minutes | `INTERVAL_HOURLY` |
 | Heat index (Ministry of the Environment) | 60 minutes | `INTERVAL_WBGT` |
 | Earthquakes, early warnings and tsunami information (P2P地震情報) | Pushed. Each place keeps one WebSocket open (at most two places per home, see [Known limits](#known-limits)). The recent history and the tsunami list are read on every connect. | `URL_P2P_WS`, `URL_P2P_HISTORY`, `URL_P2P_TSUNAMI` |
+| Expiry of a tsunami bulletin that was never cancelled (a clock tick, not a feed) | 10 minutes. Only an entry with an earthquake connection has the timer. | `TSUNAMI_TICK` in `__init__.py` |
 
 When a poll fails, the entities keep the last good data until it is older than three times the interval
 (`STALE_FACTOR`). After that they become unavailable. A feed whose file changes shape fails the same way, without
 a traceback in the log.
+
+The rows of the hourly forecast are in Japan's hours (JST, +09:00). The weather entity picks the current hour by
+Japan's clock, whatever time zone Home Assistant is set to. This holds in a zone with a half-hour offset too.
+
+### How the feed-problem sensor judges a feed
+
+`binary_sensor.jma_<place>_feed_problem` looks at the feeds once a minute and whenever a feed updates. A feed counts
+as a problem when its condition below has held for the grace time of 30 minutes (`HEALTH_GRACE`). The sensor is on
+when any feed is a problem.
+
+| Attribute | Condition | Constant |
+|---|---|---|
+| `warnings` | The warnings file was not fetched for 10 minutes. Or JMA's JSON file is behind the XML feed. Or the XML cross-check was not fetched for 30 minutes. | `WARNINGS_MAX_SILENCE`, `XML_MAX_SILENCE` in `binary_sensor.py` |
+| `amedas` | No AMeDAS observation is newer than 40 minutes. | `HEALTH_AMEDAS_MAX_AGE` |
+| `amedas_station` | One of the two stations has answered nothing for more than 40 minutes while the other answers. | `HEALTH_AMEDAS_MAX_AGE` |
+| `hourly` | The hourly forecast was not fetched for 3 hours. | `HEALTH_HOURLY_MAX_AGE` |
+| `nowcast` | No nowcast frame is newer than 20 minutes. | `HEALTH_NOWCAST_MAX_AGE` |
+| `forecast` | No forecast was issued in the last 13 hours. JMA issues at 05, 11 and 17 JST, so the night gap is 12 hours. | `HEALTH_FORECAST_MAX_AGE` |
+| `quake` | The P2P地震情報 connection has been down for more than 10 minutes. Only for an entry that holds a connection. | `HEALTH_QUAKE_MAX_DOWN` |
+
+The constants are in `const.py` unless the table says otherwise.
+
+## Repair issues
+
+Two problems also appear under **Settings > Repairs**. You cannot fix them from the Repairs page: each one tells you
+what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 and `{station}` is the station id.
+
+### No earthquake connection
+
+- **Title:** "{title} has no earthquake connection"
+- **Text:** "The earthquake service (P2P地震情報) allows {limit} connections per IP address, and other JMA entries use
+  them. {title} shows no earthquake data until one of them is removed or disabled; it then takes the free
+  connection by itself."
+- **When it appears:** when an entry is set up and two other JMA entries already hold the two connections. The
+  entry is set up without an earthquake connection. Its earthquake and tsunami sensors are `unavailable`, and
+  the log has one line saying so.
+- **What clears it:** you remove or disable one of the other JMA entries. The entry that waits then reloads by
+  itself, takes the free connection and the issue is deleted. The issue is also deleted when the entry is unloaded
+  or removed, and a reload asks again.
+
+### An AMeDAS station is silent
+
+- **Title:** "AMeDAS station {station} is silent"
+- **Text:** "AMeDAS station {station} has sent no observation to {title} for a while, while its other station
+  still answers. The station may have closed or changed its id. Open Configure on the entry and enter another
+  station id, or run Reconfigure on the entry to pick the nearest stations again."
+- **When it appears:** when one of the two AMeDAS stations of the entry has answered nothing for more than
+  40 minutes while the other answers, and the feed-problem sensor has shown it for the grace time of 30 minutes
+  (`amedas_station` in [the table above](#how-the-feed-problem-sensor-judges-a-feed)). The feed-problem sensor
+  raises the issue. It is not raised when both stations of the entry have the same id.
+- **What clears it:** the silent station answers again, or the entry is set up again with other stations (you
+  entered another id under [Options](#options) or ran [Reconfigure](#reconfigure)). The issue is also deleted
+  when the entry is unloaded or removed.
 
 ## Known limits
 
@@ -455,8 +673,8 @@ a traceback in the log.
 **Earthquake connections**
 
 - P2P地震情報 allows two connections per IP address, and each place keeps one open. So at most two places per
-  home receive earthquake information. A third place opens no connection and logs one line saying so. Its
-  earthquake and tsunami sensors stay unavailable.
+  home receive earthquake information. A third place opens no connection and logs one line saying so. It also
+  shows a [repair issue](#no-earthquake-connection). Its earthquake and tsunami sensors stay unavailable.
 
 <details>
 <summary>How well the municipality name match works (counted over <code>tests/fixtures/area.json</code>)</summary>
@@ -585,12 +803,49 @@ Where a service states no rate limit, none is given here. The intervals in
   (with the XML cross-check), AMeDAS observations (and each of the two stations), the hourly forecast, the rain
   nowcast, the daily forecast and the earthquake connection. Each feed's attribute shows `problem`, `since` and
   `reason`. The other feeds (outlook, typhoons, heat, map layers, nationwide forecast) are optional and are not
-  watched.
+  watched. The limits are in [How the feed-problem sensor judges a feed](#how-the-feed-problem-sensor-judges-a-feed).
+  The error text inside a `reason` is cut to 200 characters (the last character is `…`), so a server's whole error
+  page does not fill the attribute.
 - **Turn on debug logging.** Add `custom_components.jma: debug` under `logger:` in `configuration.yaml` to see the
   detail for each feed.
+- **The entry says "Retrying setup".** None of the four main feeds could be fetched, so the set-up was not
+  completed. The entry shows: "Could not reach the Japan Meteorological Agency's servers. Home Assistant will try
+  again." Check that the machine that runs Home Assistant can open <https://www.jma.go.jp/bosai/> (name lookup,
+  firewall, proxy). Home Assistant tries again by itself. See [When JMA cannot be reached](#when-jma-cannot-be-reached).
+- **A set-up or Reconfigure stops with "Could not reach the Japan Meteorological Agency's server."**
+  (`cannot_connect`). JMA's area list or station table could not be fetched, or it was not in the shape the
+  integration reads (a maintenance page, for example). Nothing was saved. Try again later.
+- **Configure shows "An AMeDAS station id is five digits, for example 44071."** (`invalid_station`). Type five
+  digits. Full-width digits are accepted.
+- **Configure shows "No AMeDAS station has this id in the agency's table. Check the id, for example 44071."**
+  (`unknown_station`). The id has five digits but is not in JMA's station table,
+  <https://www.jma.go.jp/bosai/amedas/const/amedastable.json>. Check the id there. If the table cannot be fetched
+  at that moment, an id is accepted as typed.
+- **`jma.simulate` fails.** The action stops with one of these messages:
+
+  | Message | Key | Cause and fix |
+  |---|---|---|
+  | No loaded JMA entry has that id. | `simulate_entry_not_found` | `config_entry_id` names an entry that does not exist, is not a JMA entry or is not loaded (it is disabled, or retrying its set-up). Use the id of a loaded JMA entry, or leave the field empty. |
+  | That entry does not have the debug option on. Switch on "Enable the jma.simulate test action" in its options. | `simulate_not_enabled` | The entry named in `config_entry_id` has the option off. Switch it on under **Configure**. |
+  | No JMA entry has the debug option on. Switch on "Enable the jma.simulate test action" in the options of an entry. | `simulate_no_debug_entry` | `config_entry_id` was left empty and no loaded entry has the option on. Switch it on under **Configure**. |
+
+- **A repair issue appears.** See [Repair issues](#repair-issues).
 - **No heat-index sensor, or the tsunami sensor is always `none`.** This is expected outside Tokyo. The heat
   index needs the Tokyo office, and the coast area needs a Tokyo municipality. See [Known limits](#known-limits).
 - **No earthquake values for a third place.** See [Known limits](#known-limits).
+- **Look in the log.** These lines come from the integration. Each is written once for an outage or a run of
+  failed polls, not once per attempt. The attempts in between are written at debug level.
+
+  | Log line | Level | What it means |
+  |---|---|---|
+  | `P2P earthquake connection lost: <reason>; reconnecting` | WARNING | The earthquake connection was open and dropped. The integration reconnects by itself. |
+  | `P2P earthquake connection cannot be opened: <reason>; retrying` | WARNING | A connection could not be opened, for example at start, when P2P地震情報 refuses it or cannot be reached. The integration tries again by itself. |
+  | `P2P earthquake connection is back` | INFO | The connection is open again. This ends the outage. |
+  | `jma <feed>: unexpected payload: <error>` | WARNING | A file arrived but did not have the shape the integration reads. The entities keep the last good data (see [Update intervals](#update-intervals)). `<feed>` is `forecast`, `hourly`, `amedas`, `warnings`, `nowcast`, `warning outlook`, `typhoon`, `wbgt`, `heat alert`, `japan` or `layers`. |
+  | `jma <feed>: data is back after N failed poll(s)` | INFO | The feed works again after an "unexpected payload" run of N failed polls. |
+
+  When a feed fails and has no good data left to keep (see [Update intervals](#update-intervals)), Home Assistant
+  itself logs it once, and once more when the feed recovers.
 
 ## Removing the integration
 
@@ -598,6 +853,17 @@ Where a service states no rate limit, none is given here. The intervals in
    select **Delete**. Repeat for every entry.
 2. Remove the integration in HACS. If you installed it by hand, delete the folder `custom_components/jma`.
 3. Restart Home Assistant.
+
+What is deleted with an entry:
+
+- The entry, its device, its entities and its [repair issues](#repair-issues). Home Assistant does this.
+- The file where the integration remembers what it has announced (typhoon stages, heat alerts and tsunami
+  information, see [After a restart](#after-a-restart)). It is `jma.<entry id>.alert_memory` in the `.storage` folder
+  of your Home Assistant configuration. It is the only file the integration writes.
+- The earthquake connection of the entry. If another JMA entry has none, it reloads by itself and takes it.
+
+Nothing else is left behind. The integration keeps no account, key or other file. The only trace is the history
+of the entities in the database of Home Assistant, which Home Assistant removes on its normal schedule.
 
 ## Reporting problems and contributing
 

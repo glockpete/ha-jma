@@ -3,6 +3,82 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
+## 0.7.0 - quality scale
+
+Work towards the Home Assistant Integration Quality Scale.
+
+### Added
+
+- **Reconfigure.** The entry menu has a **Reconfigure** item. It picks the two AMeDAS stations again from JMA's
+  current tables and the home of Home Assistant, and refreshes the area names stored with the entry (an entry made
+  before 0.6 gains its Japanese area name). The municipality and the entry title do not change, so a name you gave
+  the entry stays. A station id typed under Configure is dropped; the `jma.simulate` setting stays. The entry
+  reloads only when it is set up and a setting changed.
+- **Repair issues** under **Settings > Repairs**: `no_quake_socket` for an entry that cannot get one of the two
+  earthquake connections, and `station_silent` for an AMeDAS station that answers nothing while the other one does.
+  Each goes by itself when its cause goes: the connection is free, or the station answers, or the entry is set up
+  again with other stations.
+- **"Retrying setup".** When none of the four main feeds (forecast, warnings, AMeDAS observations, rain nowcast)
+  can be fetched, the set-up is not completed and Home Assistant retries with growing waits. One feed that answers,
+  or a file that arrives but does not parse, still sets up, and the entities wait for their feed.
+- **A check of the station ids in Configure against JMA's station table.** An id of five digits that no station has
+  shows `unknown_station`. When the table cannot be fetched, the ids are accepted as typed.
+- **`icons.json`.** Entity icons moved from Python to `icons.json`, with state icons for the tsunami and heat-alert
+  sensors, a range of icons for the warning level and an icon for the `jma.simulate` action.
+- **Help text under every form field** (`data_description`) in English and Japanese, and the abort text
+  `already_in_progress`.
+- **The version of the integration on the device page** (`sw_version`).
+- **Test coverage.** Every module is above 95 % line coverage. New tests cover the config-flow aborts, the options
+  flow, Reconfigure, the repair issues, the retrying setup, the home-moved reload, the device titles for all 1,805
+  municipalities, the station-id checks, the unavailable earthquake sensors, the log lines and the reason length.
+
+### Changed
+
+- `binary_sensor.jma_<place>_feed_problem` has the **diagnostic** entity category.
+- `sensor.jma_<place>_radar_frames` and `sensor.jma_<place>_japan` are **disabled by default** on a new place.
+  Entities that exist keep their state. Enable them in the entity settings when a map card or the nationwide
+  forecast needs them.
+- `sensor.jma_<place>_last_earthquake` and `sensor.jma_<place>_tsunami` become **unavailable** when the P2P地震情報
+  connection has been down for more than 10 minutes, the limit the feed-problem sensor uses, and are available
+  again when it is back. A shorter drop changes nothing. The alerts event entity stays available.
+- **The log is written once per outage.** The earthquake connection writes one WARNING when an outage begins
+  (`P2P earthquake connection lost` or `P2P earthquake connection cannot be opened`), debug lines for the retries and
+  one INFO when it is back. A feed writes one WARNING for a run of unexpected payloads and one INFO when its data is
+  back after N failed polls.
+- **The first refresh runs in two phases.** The four main feeds first. The other feeds, the heat-alert and typhoon
+  files among them, only after the check for "Retrying setup" has passed, so that an alert decided in a set-up that
+  is then retried is not remembered as announced.
+- **Strict typing, first pass.** `mypy --strict` passes on 21 of the 29 modules: the parsers, the coordinators, the
+  memory store and the earthquake client. The settings are in `[tool.mypy]` in `pyproject.toml`. Three spellings
+  became explicit: a merge with no primary observation returns the secondary one, a headline with no data type is not
+  looked up, and a map-tile pixel of an impossible shape raises a parse error instead of a `TypeError`.
+- The success text of Reconfigure no longer says that the entry is reloading ("The stations and names were
+  updated."), because it reloads only when it is set up and a setting changed.
+- The README describes the set-up dialogs with their texts, Options, Reconfigure, the move of the home, the device
+  titles, the retrying setup, the repair issues, the disabled and diagnostic entities, the health limits of the
+  feed-problem sensor, the log lines to look for, and what is deleted with an entry. `README.ja.md` has short
+  bullets for the same.
+
+### Fixed
+
+- `sensor.jma_<place>_warning_level` is `unknown` instead of 0 when the warnings file has no row for the
+  municipality. 0 reads as "nothing in force" when nothing is known. The attribute `area_missing` still says why.
+- The weather entity picks the current row of the hourly forecast, and starts the hourly forecast, at Japan's hour.
+  The rows are in JST. In a time zone with a half-hour offset (Asia/Kolkata, Australia/Adelaide) the hour was floored
+  to half past the JST hour, so from half past the hour on the next hour's row was used.
+- The error text in a `reason` of the feed-problem sensor is cut to 200 characters. A stored error, such as a
+  server's whole HTML page, no longer fills an attribute that is written to the recorder every minute.
+- Two municipalities with one English name, such as Chuo in Tokyo and in Yamanashi, got the same device name and
+  entity ids ending in `_2`. A shared name is now followed by the forecast office: `JMA Chuo (Tokyo)` and
+  `JMA Chuo (Yamanashi)`. The city among towns keeps the plain name (`JMA Chiyoda`; Chiyoda Town in Gunma becomes
+  `JMA Chiyoda (Gunma)`). This applies to places added from now on. Existing entries keep their title.
+- Moving the home in Settings left the rain tile on the old place until a restart. The entry now reloads when the
+  latitude or longitude changes. Any other change to the core configuration leaves it alone.
+
+- CI: (controller)
+- Typing pass 2: (controller)
+- Quality scale: (controller)
+
 ## 0.6.2 - plain-English README
 
 ### Changed
