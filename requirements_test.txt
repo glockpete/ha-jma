@@ -1,3 +1,4 @@
 pytest-homeassistant-custom-component==0.13.373
 pytest-cov==7.1.0
 coverage-threshold==0.6.2
+mypy==2.4.0

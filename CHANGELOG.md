@@ -32,6 +32,14 @@ Work towards the Home Assistant Integration Quality Scale.
   flow, Reconfigure, the repair issues, the retrying setup, the home-moved reload, the device titles for all 1,805
   municipalities, the station-id checks, the unavailable earthquake sensors, the log lines and the reason length.
 
+- **Quality scale.** `custom_components/jma/quality_scale.yaml` lists every rule of the Home Assistant Integration
+  Quality Scale with where it is met or why it does not apply, and `manifest.json` declares `platinum`. Home
+  Assistant checks this file only for its own integrations, so `tests/test_quality_scale_file.py` does it here: all
+  54 rules once, in hassfest's order, no `todo`, a reason on every exemption, and the declared tier earned.
+- **Continuous integration.** Two coverage gates: pytest-cov fails the run when the total line coverage of
+  `custom_components/jma` is under 95 %, and coverage-threshold fails it when any one module is. A mypy job runs
+  `mypy --strict` over the package (mypy 2.4.0, pinned in `requirements_test.txt`).
+
 ### Changed
 
 - `binary_sensor.jma_<place>_feed_problem` has the **diagnostic** entity category.
@@ -48,10 +56,12 @@ Work towards the Home Assistant Integration Quality Scale.
 - **The first refresh runs in two phases.** The four main feeds first. The other feeds, the heat-alert and typhoon
   files among them, only after the check for "Retrying setup" has passed, so that an alert decided in a set-up that
   is then retried is not remembered as announced.
-- **Strict typing, first pass.** `mypy --strict` passes on 21 of the 29 modules: the parsers, the coordinators, the
-  memory store and the earthquake client. The settings are in `[tool.mypy]` in `pyproject.toml`. Three spellings
-  became explicit: a merge with no primary observation returns the secondary one, a headline with no data type is not
-  looked up, and a map-tile pixel of an impossible shape raises a parse error instead of a `TypeError`.
+- **Strict typing.** `mypy --strict` passes on all 29 modules, with no `type: ignore` and no `cast`. The settings
+  are in `[tool.mypy]` in `pyproject.toml`. The coordinator sensors are generic over their coordinator's data, and
+  the hourly and daily rows are Home Assistant `Forecast` rows (the daily one with JMA's code, icon, reliability and
+  the temperature ranges as extra keys). Three spellings became explicit: a merge with no primary observation returns
+  the secondary one, a warning with no data type is not looked up in the headlines, and a map-tile pixel of an
+  impossible shape raises a parse error instead of a `TypeError`.
 - The success text of Reconfigure no longer says that the entry is reloading ("The stations and names were
   updated."), because it reloads only when it is set up and a setting changed.
 - The README describes the set-up dialogs with their texts, Options, Reconfigure, the move of the home, the device
@@ -74,10 +84,6 @@ Work towards the Home Assistant Integration Quality Scale.
   `JMA Chiyoda (Gunma)`). This applies to places added from now on. Existing entries keep their title.
 - Moving the home in Settings left the rain tile on the old place until a restart. The entry now reloads when the
   latitude or longitude changes. Any other change to the core configuration leaves it alone.
-
-- CI: (controller)
-- Typing pass 2: (controller)
-- Quality scale: (controller)
 
 ## 0.6.2 - plain-English README
 

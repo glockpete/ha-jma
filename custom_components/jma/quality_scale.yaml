@@ -1,0 +1,79 @@
+# Home Assistant Integration Quality Scale, self-declared (hassfest validates this file for core integrations only).
+# Rule pages: https://contributors.home-assistant.io/core/quality-scale/<rule-id>/
+# Each `done` line names where the rule is met; `exempt` carries the reason as the rule pages ask.
+rules:
+  # Bronze
+  action-setup: done  # __init__.py async_setup registers jma.simulate once, not per entry
+  appropriate-polling: done  # const.py INTERVAL_*: 60 s warnings, 5-60 min for the rest, matched to each feed's update rate
+  brands: done  # custom_components/jma/brand/ (icon + logo, served by HA >= 2026.3 before the brands CDN); tests/test_brand.py
+  common-modules: done  # coordinator.py (DataUpdateCoordinator subclasses), entity.py (JmaEntity base)
+  config-flow: done  # config_flow.py: office -> municipality -> confirm, with data_description on every field
+  config-flow-test-coverage: done  # tests/test_init.py, test_hardening_lifecycle.py, test_options_flow_http.py, test_station_id_validation.py, test_reconfigure_flow.py, test_device_title.py
+  dependency-transparency: done  # manifest requirements: [] (aiohttp and voluptuous come with Home Assistant)
+  docs-actions: done  # README "Test your automations" (jma.simulate)
+  docs-conditions:
+    status: exempt
+    comment: The integration has no conditions of its own; automations use the entity states and the events.
+  docs-high-level-description: done  # README intro: what it reads from the Japan Meteorological Agency and the other sources
+  docs-installation-instructions: done  # README "Install" (requirements, HACS, by hand) and "Set up"
+  docs-removal-instructions: done  # README "Removing the integration"
+  docs-triggers:
+    status: exempt
+    comment: The integration has no triggers of its own; automations use the jma_alert events (README "Events").
+  entity-event-setup: done  # sensor.py / event.py subscribe in async_added_to_hass with async_on_remove
+  entity-unique-id: done  # entity.py: <area code>_<key>
+  has-entity-name: done  # entity.py _attr_has_entity_name = True; weather.py uses the device name
+  runtime-data: done  # __init__.py entry.runtime_data = JmaRuntime; JmaConfigEntry = ConfigEntry[JmaRuntime]
+  test-before-configure: done  # config_flow.py fetches the area list and the station table and aborts cannot_connect
+  test-before-setup: done  # __init__.py raises ConfigEntryNotReady (jma_unreachable) when no core feed can be fetched
+  unique-config-entry: done  # config_flow.py async_set_unique_id(area) + _abort_if_unique_id_configured
+
+  # Silver
+  action-exceptions: done  # __init__.py ServiceValidationError with translation keys for the three simulate failures
+  config-entry-unloading: done  # __init__.py async_unload_entry; listeners and timers through entry.async_on_unload
+  docs-configuration-parameters: done  # README "Options"
+  docs-installation-parameters: done  # README "Set up"
+  entity-unavailable: done  # CoordinatorEntity for the polled feeds; sensor.py _QuakeSocketSensor after a 10-minute socket outage
+  integration-owner: done  # manifest codeowners @glockpete
+  log-when-unavailable: done  # quake_ws.py one WARNING per outage and one INFO when back; coordinator.py one WARNING per run of failed polls
+  parallel-updates: done  # PARALLEL_UPDATES = 0 in sensor.py, binary_sensor.py, weather.py, event.py
+  reauthentication-flow:
+    status: exempt
+    comment: The data sources are public and need no account, key or password; there is nothing to re-authenticate.
+  test-coverage: done  # pytest-cov gate in .github/workflows/tests.yml: total and every module >= 95 %
+
+  # Gold
+  devices: done  # entity.py: one service device per entry with manufacturer, model, sw_version and configuration_url
+  diagnostics: done  # diagnostics.py: coordinates, area, names, station ids and title redacted, also inside error text
+  discovery:
+    status: exempt
+    comment: A web service, not a device on the network; there is nothing to discover.
+  discovery-update-info:
+    status: exempt
+    comment: A web service, not a device on the network; there is no address to update.
+  docs-data-update: done  # README "Update intervals"
+  docs-examples: done  # README "Example automations"
+  docs-known-limitations: done  # README "Known limits"
+  docs-supported-devices: done  # README "Set up" and "Known limits": any municipality in JMA's table; WBGT and tsunami areas for Tokyo only
+  docs-supported-functions: done  # README "Entities" and "Events"
+  docs-troubleshooting: done  # README "Troubleshooting"
+  docs-use-cases: done  # README "Features" and "Use it in automations"
+  dynamic-devices:
+    status: exempt
+    comment: One service device per config entry, made at setup; no devices appear later.
+  entity-category: done  # binary_sensor.py feed_problem is EntityCategory.DIAGNOSTIC
+  entity-device-class: done  # timestamp, enum, precipitation_intensity, problem where one fits
+  entity-disabled-by-default: done  # sensor.py radar_frames and japan are off by default
+  entity-translations: done  # translations/en.json + ja.json entity names; translation_key on every entity
+  exception-translations: done  # translations exceptions.*: jma_unreachable and the three simulate errors
+  icon-translations: done  # icons.json: state and range icons, the simulate action icon
+  reconfiguration-flow: done  # config_flow.py async_step_reconfigure
+  repair-issues: done  # __init__.py no_quake_socket, binary_sensor.py station_silent
+  stale-devices:
+    status: exempt
+    comment: One service device per config entry; it goes with the entry and nothing else can go stale.
+
+  # Platinum
+  async-dependency: done  # no library of its own; every request goes through Home Assistant's aiohttp session
+  inject-websession: done  # __init__.py and config_flow.py: JmaApi(async_get_clientsession(hass))
+  strict-typing: done  # pyproject.toml [tool.mypy] strict on custom_components/jma; mypy job in .github/workflows/tests.yml

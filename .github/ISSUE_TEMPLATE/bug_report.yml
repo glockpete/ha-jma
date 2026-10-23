@@ -11,7 +11,7 @@ body:
     attributes:
       label: Integration version
       description: "`version` in `custom_components/jma/manifest.json`, or the version HACS shows."
-      placeholder: "0.6.2"
+      placeholder: "0.7.0"
     validations:
       required: true
   - type: input

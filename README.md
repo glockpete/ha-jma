@@ -56,6 +56,7 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
 - [Privacy](#privacy)
 - [Troubleshooting](#troubleshooting)
 - [Removing the integration](#removing-the-integration)
+- [Quality scale](#quality-scale)
 - [Reporting problems and contributing](#reporting-problems-and-contributing)
 - [Licence](#licence)
 
@@ -864,6 +865,15 @@ What is deleted with an entry:
 
 Nothing else is left behind. The integration keeps no account, key or other file. The only trace is the history
 of the entities in the database of Home Assistant, which Home Assistant removes on its normal schedule.
+
+## Quality scale
+
+`manifest.json` declares the tier **platinum** of the
+[Home Assistant Integration Quality Scale](https://www.home-assistant.io/docs/quality_scale/), and
+`custom_components/jma/quality_scale.yaml` lists every rule of the scale with where it is met or why it does not
+apply (no account to re-authenticate, no device to discover). Home Assistant checks that file only for its own
+integrations, so `tests/test_quality_scale_file.py` checks it here: every rule once, no rule left to do, a reason on
+every exemption, and the tier the manifest claims earned.
 
 ## Reporting problems and contributing
 
