@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Any
 
-from homeassistant.components.weather import Forecast, WeatherEntity, WeatherEntityFeature
+from homeassistant.components.weather import Forecast, WeatherEntity
+from homeassistant.components.weather.const import WeatherEntityFeature
 from homeassistant.const import (
     UnitOfPrecipitationDepth,
     UnitOfPressure,
@@ -20,10 +21,22 @@ from homeassistant.util import dt as dt_util
 from .const import ATTRIBUTION
 from .coordinator import JmaConfigEntry
 from .entity import JmaEntity
-from .parse_amedas import JST
+from .parse_amedas import JST, Observation
 from .parse_forecast import DayForecast, condition_for, icon_for, name_for
 
 PARALLEL_UPDATES = 0
+
+
+class _DailyForecast(Forecast, total=False):
+    """HA's Forecast row plus the keys this integration adds to a daily one (JMA's code, icon and likely ranges)."""
+
+    jma_code: str | None
+    jma_icon: str | None
+    reliability: str | None
+    temp_max_upper: float | None
+    temp_max_lower: float | None
+    temp_min_upper: float | None
+    temp_min_lower: float | None
 
 
 def _japan_today() -> date:
@@ -94,7 +107,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
     # ---- helpers ----
 
     @property
-    def _obs(self):
+    def _obs(self) -> Observation | None:
         a = self.runtime.amedas
         return a.data if a.last_update_success else None
 
@@ -112,7 +125,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
                 return day
         return None
 
-    def _current_hour(self) -> dict[str, Any] | None:
+    def _current_hour(self) -> Forecast | None:
         h = self.runtime.hourly
         if not h.last_update_success or not h.data:
             return None
@@ -228,7 +241,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
         for day in f.data.forecast.days:
             if day.date < today:
                 continue
-            row: dict[str, Any] = {
+            row: _DailyForecast = {
                 "datetime": datetime.combine(day.date, time(0), tz).isoformat(),
                 "condition": condition_for(day.code),
                 "native_temperature": day.temp_max,
@@ -238,10 +251,15 @@ class JmaWeather(JmaEntity, WeatherEntity):
                 "jma_icon": icon_for(day.code),
                 "reliability": day.reliability,
             }
-            for key in ("temp_max_upper", "temp_max_lower", "temp_min_upper", "temp_min_lower"):
-                if getattr(day, key) is not None:
-                    row[key] = getattr(day, key)
-            rows.append(row)  # type: ignore[arg-type]
+            if day.temp_max_upper is not None:
+                row["temp_max_upper"] = day.temp_max_upper
+            if day.temp_max_lower is not None:
+                row["temp_max_lower"] = day.temp_max_lower
+            if day.temp_min_upper is not None:
+                row["temp_min_upper"] = day.temp_min_upper
+            if day.temp_min_lower is not None:
+                row["temp_min_lower"] = day.temp_min_lower
+            rows.append(row)
         return rows
 
     async def async_forecast_hourly(self) -> list[Forecast] | None:
@@ -249,7 +267,4 @@ class JmaWeather(JmaEntity, WeatherEntity):
         if not h.last_update_success or not h.data:
             return None
         start = _japan_hour_start()
-        return [
-            row for row in h.data  # type: ignore[misc]
-            if datetime.fromisoformat(row["datetime"]) >= start
-        ]
+        return [row for row in h.data if datetime.fromisoformat(row["datetime"]) >= start]

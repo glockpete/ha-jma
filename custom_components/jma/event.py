@@ -38,7 +38,7 @@ class JmaAlerts(JmaEntity, EventEntity):
         super().__init__(entry, "alerts")
         self._queue: list[tuple[str, dict[str, Any]]] = []
         self._started = False
-        self._flushing: asyncio.Task | None = None
+        self._flushing: asyncio.Task[None] | None = None
 
     @property
     def available(self) -> bool:

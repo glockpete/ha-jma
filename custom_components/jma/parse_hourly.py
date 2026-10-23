@@ -1,11 +1,15 @@
-"""Parse Open-Meteo's JMA endpoint (models=jma_msm) into hourly forecast rows. No HA imports."""
+"""Parse Open-Meteo's JMA endpoint (models=jma_msm) into hourly forecast rows. No HA imports at run time:
+HA's `Forecast` is only the type of a row."""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from .errors import JmaParseError
+
+if TYPE_CHECKING:
+    from homeassistant.components.weather import Forecast
 
 HOURLY_VARS = (
     "temperature_2m",
@@ -23,8 +27,12 @@ HOURLY_VARS = (
 # Note: all-null for JMA models (msm and seamless): uv_index, visibility,
 # wind_gusts_10m, cape, and precipitation_probability (kept above; it is simply left out).
 
-# variable -> HA Forecast key
-KEYS = {
+# variable -> HA Forecast key. The keys are Literals so that `row[key]` is a checked Forecast key.
+type ForecastKey = Literal[
+    "native_temperature", "native_apparent_temperature", "native_precipitation", "precipitation_probability",
+    "native_wind_speed", "wind_bearing", "humidity", "cloud_coverage", "native_dew_point",
+]
+KEYS: dict[str, ForecastKey] = {
     "temperature_2m": "native_temperature",
     "apparent_temperature": "native_apparent_temperature",
     "precipitation": "native_precipitation",
@@ -72,7 +80,7 @@ def wmo_condition(code: int | None, is_day: bool) -> str | None:
     return None
 
 
-def parse_hourly(data: Any) -> list[dict[str, Any]]:
+def parse_hourly(data: Any) -> list[Forecast]:
     """Rows with HA Forecast keys; variables that are null for every hour are left out."""
     try:
         hourly = data["hourly"]
@@ -88,9 +96,9 @@ def parse_hourly(data: Any) -> list[dict[str, Any]]:
         values = hourly.get(var) or []
         return values[i] if i < len(values) else default  # a ragged array must not raise
 
-    rows = []
+    rows: list[Forecast] = []
     for i, when in enumerate(times):
-        row: dict[str, Any] = {"datetime": datetime.fromisoformat(when).replace(tzinfo=tz).isoformat()}
+        row: Forecast = {"datetime": datetime.fromisoformat(when).replace(tzinfo=tz).isoformat()}
         for var, key in KEYS.items():
             if var in present:
                 row[key] = at(var, i)

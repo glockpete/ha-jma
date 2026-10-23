@@ -3,7 +3,7 @@ overview, last earthquake, typhoon, WBGT, キキクル at the configured place, 
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -16,7 +16,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity, DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -31,11 +31,23 @@ from .const import (
     WBGT_ATTRIBUTION,
     WBGT_PREF,
 )
-from .coordinator import JmaConfigEntry, signal_quake
+from .coordinator import (
+    ForecastBundle,
+    HeatAlertState,
+    JmaConfigEntry,
+    LayersState,
+    NowcastState,
+    TyphoonState,
+    WarningsState,
+    WbgtState,
+    signal_quake,
+)
 from .entity import JmaEntity
 from .parse_heat_alert import grades
+from .parse_japan import JapanForecast
 from .parse_layers import layers_attribute
 from .parse_nowcast import parse_jma_time
+from .parse_timeline import WarningOutlook
 from .parse_tsunami import CONDITION_EN
 from .quake_ws import quake_event_data
 
@@ -69,15 +81,17 @@ async def async_setup_entry(
     async_add_entities(sensors)
 
 
-class _CoordSensor(JmaEntity, CoordinatorEntity, SensorEntity):
+class _CoordSensor[T](JmaEntity, CoordinatorEntity[DataUpdateCoordinator[T]], SensorEntity):
+    """A sensor fed by one coordinator; T is the type of that coordinator's data."""
+
     _attr_attribution = JMA_ATTRIBUTION  # every sensor of this base shows the agency's data
 
-    def __init__(self, entry: JmaConfigEntry, key: str, coordinator) -> None:
+    def __init__(self, entry: JmaConfigEntry, key: str, coordinator: DataUpdateCoordinator[T]) -> None:
         JmaEntity.__init__(self, entry, key)
         CoordinatorEntity.__init__(self, coordinator)
 
 
-class WarningLevelSensor(_CoordSensor):
+class WarningLevelSensor(_CoordSensor[WarningsState]):
     """0 = nothing in force; 2..5 = highest JMA level for the area; unknown when the file does not hold the area."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -102,7 +116,9 @@ class WarningLevelSensor(_CoordSensor):
         }
         if d:
             top = d.area.warnings[0] if d.area.warnings else None
-            headline = (d.area.headlines.get(top.data_type) if top else None) or d.area.headline
+            headline = (
+                d.area.headlines.get(top.data_type) if top and top.data_type is not None else None
+            ) or d.area.headline
             attrs.update(
                 warnings=[w.as_dict() for w in d.area.warnings],
                 headline=headline,
@@ -113,7 +129,7 @@ class WarningLevelSensor(_CoordSensor):
         return attrs
 
 
-class RainNextHourSensor(_CoordSensor):
+class RainNextHourSensor(_CoordSensor[NowcastState]):
     """Max rain intensity at the configured place over the next 60 minutes (band upper bound)."""
 
     _attr_device_class = SensorDeviceClass.PRECIPITATION_INTENSITY
@@ -142,7 +158,7 @@ class RainNextHourSensor(_CoordSensor):
         }
 
 
-class RadarFramesSensor(_CoordSensor):
+class RadarFramesSensor(_CoordSensor[NowcastState]):
     """Frame lists for map consumers (targetTimes has no CORS header, so HA serves them).
 
     `layers` comes from the layers coordinator; the state stays the nowcast basetime.
@@ -184,7 +200,7 @@ class RadarFramesSensor(_CoordSensor):
         return attrs
 
 
-class OverviewSensor(_CoordSensor):
+class OverviewSensor(_CoordSensor[ForecastBundle]):
     """JMA's prose overview for the office (Japanese)."""
 
     _unrecorded_attributes = frozenset({"text"})
@@ -211,7 +227,7 @@ class OverviewSensor(_CoordSensor):
         }
 
 
-class WarningOutlookSensor(_CoordSensor):
+class WarningOutlookSensor(_CoordSensor[WarningOutlook]):
     """Highest warning level (0/2..5) JMA's 3-hourly risk outlook expects for the area."""
 
     _unrecorded_attributes = frozenset({"steps", "daily"})
@@ -232,7 +248,7 @@ class WarningOutlookSensor(_CoordSensor):
         return {"report_time": d.report_time, "steps": d.steps, "daily": d.daily, "peak": d.peak}
 
 
-class TyphoonSensor(_CoordSensor):
+class TyphoonSensor(_CoordSensor[TyphoonState]):
     """Number of active tropical cyclones (0 is a valid state)."""
 
     _unrecorded_attributes = frozenset({"storms"})
@@ -251,7 +267,7 @@ class TyphoonSensor(_CoordSensor):
         return {"storms": d.storms} if d else {}
 
 
-class WbgtSensor(_CoordSensor):
+class WbgtSensor(_CoordSensor[WbgtState]):
     """Today's (JST) highest forecast WBGT (暑さ指数). Unavailable out of season.
 
     No device class: WBGT is not an air temperature.
@@ -284,7 +300,7 @@ class WbgtSensor(_CoordSensor):
         return {"series": f.series, "issued": f.issued, "station": f.station}
 
 
-class HeatAlertSensor(_CoordSensor):
+class HeatAlertSensor(_CoordSensor[HeatAlertState]):
     """環境省 熱中症警戒アラート for the office's prefecture: today's grade (none / alert / special).
 
     Unavailable when there is no bulletin (out of season, nothing published or fetched). The state
@@ -301,7 +317,7 @@ class HeatAlertSensor(_CoordSensor):
         super().__init__(entry, "heat_alert", entry.runtime_data.heat_alert)
 
     @staticmethod
-    def _today():
+    def _today() -> date:
         return dt_util.utcnow().astimezone(timezone(timedelta(hours=9))).date()
 
     @property
@@ -338,7 +354,7 @@ class HeatAlertSensor(_CoordSensor):
         }
 
 
-class KikikuruSensor(_CoordSensor):
+class KikikuruSensor(_CoordSensor[LayersState]):
     """キキクル (浸水・土砂・洪水) at the configured place, newest frame: max level 0-5."""
 
 
@@ -366,7 +382,7 @@ class KikikuruSensor(_CoordSensor):
                 "partial": [name for name in KIKIKURU_ELEMENTS if getattr(k, name) is None]}
 
 
-class RainOutlookSensor(_CoordSensor):
+class RainOutlookSensor(_CoordSensor[LayersState]):
     """降水短時間予報 at the configured place beyond the nowcast hour: max mm/h (band upper bound)."""
 
     _attr_device_class = SensorDeviceClass.PRECIPITATION_INTENSITY
@@ -396,7 +412,7 @@ class RainOutlookSensor(_CoordSensor):
         return {"series": r.series, "first_rain": r.first_rain, "basetime": r.basetime}
 
 
-class JapanSensor(_CoordSensor):
+class JapanSensor(_CoordSensor[JapanForecast]):
     """Nationwide city forecast, today + tomorrow; the state is JMA's newest report time."""
 
     _attr_device_class = SensorDeviceClass.TIMESTAMP

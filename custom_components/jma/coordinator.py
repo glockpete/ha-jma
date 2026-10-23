@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from homeassistant.components.weather import Forecast
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -295,11 +296,11 @@ class ForecastCoordinator(_JmaCoordinator[ForecastBundle]):
 
 # ---------- hourly (Open-Meteo JMA MSM) ----------
 
-class HourlyCoordinator(_JmaCoordinator[list[dict[str, Any]]]):
+class HourlyCoordinator(_JmaCoordinator[list[Forecast]]):
     def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "hourly", INTERVAL_HOURLY)
 
-    async def _fetch(self) -> list[dict[str, Any]]:
+    async def _fetch(self) -> list[Forecast]:
         data = await self.api.get_json(
             URL_OPEN_METEO, open_meteo_params(self.cfg.latitude, self.cfg.longitude))
         return parse_hourly(data)

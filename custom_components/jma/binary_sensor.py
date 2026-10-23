@@ -93,8 +93,8 @@ def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
             f"answers: {clip_error(rt.amedas.station_error.get(sid))}")
 
     h = rt.hourly
-    since = h.last_ok or h.first_try
-    if since is not None and now - since > HEALTH_HOURLY_MAX_AGE:
+    hourly_since = h.last_ok or h.first_try
+    if hourly_since is not None and now - hourly_since > HEALTH_HOURLY_MAX_AGE:
         out["hourly"] = f"Open-Meteo hourly not fetched since {h.last_ok}: {clip_error(h.last_error)}"
     else:
         out["hourly"] = None
@@ -126,7 +126,7 @@ class FeedProblem(JmaEntity, BinarySensorEntity):
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "feed_problem")
         self._tracker = HealthTracker()
-        self._state: dict[str, dict] = {}
+        self._state: dict[str, dict[str, Any]] = {}
         self._issue_id = f"station_silent_{entry.entry_id}"
         self._title = entry.title
         self._issue_station: str | None = None  # the station the repair issue is raised for, if any

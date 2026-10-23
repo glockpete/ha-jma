@@ -279,7 +279,7 @@ def _offer_free_socket(hass: HomeAssistant) -> None:
         hass.config_entries.async_schedule_reload(other.entry_id)
 
 
-def _settings(entry: JmaConfigEntry) -> dict:
+def _settings(entry: JmaConfigEntry) -> dict[str, Any]:
     """The entry's settings and its title (which the device carries)."""
     return {"_title": entry.title, **entry.data, **entry.options}
 
