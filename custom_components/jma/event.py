@@ -42,6 +42,7 @@ class JmaAlerts(JmaEntity, EventEntity):
 
     @property
     def available(self) -> bool:
+        # Always available: its events come from the polling feeds too, so a lost earthquake socket is not its outage.
         return True
 
     async def async_added_to_hass(self) -> None:

@@ -83,6 +83,7 @@ class QuakeClient:
         self._retry_sleep: Callable[[float], Any] = asyncio.sleep  # injectable for tests
         self._monotonic: Callable[[], float] = time.monotonic  # injectable for tests
         self._log_state: dict[str, tuple[float, int]] = {}  # kind -> (when last warned, how many held back since)
+        self._outage_warned = False  # the outage running now has had its one WARNING; the INFO ends it
         self._backfill_task: asyncio.Task[None] | None = None
 
     def _warn_limited(self, kind: str, msg: str, *args: Any, exc_info: bool = False) -> None:
@@ -98,6 +99,18 @@ class QuakeClient:
         if held:
             msg += f" (and {held:,} more of this kind since the last warning)"
         _LOGGER.warning(msg, *args, exc_info=exc_info)
+
+    def _log_outage(self, opened: bool, reason: str, *, exc_info: bool = False) -> None:
+        """The log of one outage (HA's log-when-unavailable): a WARNING for its first failure, DEBUG for every attempt
+        after it, an INFO from the connection that ends it. `opened`: the connection was up before it failed."""
+        if self._outage_warned:
+            _LOGGER.debug("P2P socket: %s", reason, exc_info=exc_info)
+            return
+        self._outage_warned = True
+        if opened:
+            _LOGGER.warning("P2P earthquake connection lost: %s; reconnecting", reason, exc_info=exc_info)
+        else:  # nothing was up yet (start-up) or the outage began with a refused connection
+            _LOGGER.warning("P2P earthquake connection cannot be opened: %s; retrying", reason, exc_info=exc_info)
 
     def handle(self, msg: Any, now: datetime, backfill: bool = False) -> None:
         """Route one P2P message (pushed or replayed)."""
@@ -255,6 +268,9 @@ class QuakeClient:
                 ) as ws:
                     self.connected = True
                     connected_at = dt_util.utcnow()
+                    if self._outage_warned:
+                        self._outage_warned = False
+                        _LOGGER.info("P2P earthquake connection is back")
                     self._on_quake()  # the sensor's `connected` attribute follows the socket
                     # History AFTER the socket is open: anything published while we connected is
                     # then in one or the other; id dedupe absorbs the overlap.
@@ -280,9 +296,12 @@ class QuakeClient:
             except asyncio.CancelledError:
                 raise
             except (TimeoutError, aiohttp.ClientError, OSError) as err:
-                _LOGGER.debug("P2P socket: %s", err)
-            except Exception:  # noqa: BLE001 - the quake socket must never stop for good
-                _LOGGER.exception("P2P socket: unexpected error, reconnecting")
+                self._log_outage(connected_at is not None, str(err) or type(err).__name__)
+            except Exception as err:  # noqa: BLE001 - the quake socket must never stop for good
+                # The traceback is kept for the first failure of an outage only, not once a minute.
+                self._log_outage(connected_at is not None, f"unexpected {type(err).__name__}", exc_info=True)
+            else:
+                self._log_outage(True, "closed by the server")
             finally:
                 now = dt_util.utcnow()
                 lasted = connected_at is not None and (now - connected_at).total_seconds() >= 60

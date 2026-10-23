@@ -11,14 +11,16 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import STATE_UNAVAILABLE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    HEALTH_QUAKE_MAX_DOWN,
     JMA_ATTRIBUTION,
     KIKIKURU_ELEMENTS,
     NOWCAST_ZOOM,
@@ -38,6 +40,7 @@ from .parse_tsunami import CONDITION_EN
 from .quake_ws import quake_event_data
 
 PARALLEL_UPDATES = 0
+QUAKE_DOWN_CHECK = timedelta(minutes=1)  # how often the earthquake sensors look at how long the socket has been down
 
 
 async def async_setup_entry(
@@ -412,7 +415,43 @@ class JapanSensor(_CoordSensor):
         return {"cities": d.cities} if d else {}
 
 
-class LastEarthquakeSensor(JmaEntity, SensorEntity):
+class _QuakeSocketSensor(JmaEntity, SensorEntity):
+    """A sensor whose only source is the P2P earthquake WebSocket (HA quality scale: entity-unavailable).
+
+    Unavailable when the entry holds no connection, or once the socket has been down for longer than
+    HEALTH_QUAKE_MAX_DOWN (the rule of the feed-problem sensor); a reconnect inside that time changes nothing."""
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(async_dispatcher_connect(
+            self.hass, signal_quake(self._entry_id), self._update))
+        # The socket tells us when it connects or drops, not when ten minutes of a drop have passed: look once a
+        # minute (as the feed-problem sensor does). async_on_remove ends the timer with the entity.
+        self.async_on_remove(async_track_time_interval(self.hass, self._tick, QUAKE_DOWN_CHECK))
+
+    @callback
+    def _update(self) -> None:
+        self.async_write_ha_state()
+
+    @callback
+    def _tick(self, _now: datetime) -> None:
+        """Write only when availability differs from what the state machine holds, so the tick changes nothing else
+        (a tsunami bulletin still expires on the entry's own 10 minute tick, not on this one)."""
+        if self.hass.states.is_state(self.entity_id, STATE_UNAVAILABLE) == self.available:
+            self.async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        if not super().available:
+            return False
+        quake = self.runtime.quake
+        if not quake.enabled:
+            return False
+        down_since = quake.down_since
+        return quake.connected or down_since is None or dt_util.utcnow() - down_since <= HEALTH_QUAKE_MAX_DOWN
+
+
+class LastEarthquakeSensor(_QuakeSocketSensor):
     """Origin time of the newest quake P2P reported, with the intensity in the prefecture, in the area (the 23
     wards of Tokyo only) and at the configured place (pref_max_scale / pref_shindo, area_max_scale /
     area_shindo, local_scale / local_shindo)."""
@@ -422,19 +461,6 @@ class LastEarthquakeSensor(JmaEntity, SensorEntity):
 
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "last_earthquake")
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self.async_on_remove(async_dispatcher_connect(
-            self.hass, signal_quake(self._entry_id), self._update))
-
-    @callback
-    def _update(self) -> None:
-        self.async_write_ha_state()
-
-    @property
-    def available(self) -> bool:
-        return super().available and self.runtime.quake.enabled
 
     @property
     def native_value(self) -> datetime | None:
@@ -454,7 +480,7 @@ class LastEarthquakeSensor(JmaEntity, SensorEntity):
         return attrs
 
 
-class TsunamiSensor(JmaEntity, SensorEntity):
+class TsunamiSensor(_QuakeSocketSensor):
     """Highest tsunami grade in force for the home coast area (none / watch / warning / major).
 
     Unknown until the first replay of P2P's tsunami list has run; `none` once it has run and
@@ -467,19 +493,6 @@ class TsunamiSensor(JmaEntity, SensorEntity):
 
     def __init__(self, entry: JmaConfigEntry) -> None:
         super().__init__(entry, "tsunami")
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        self.async_on_remove(async_dispatcher_connect(
-            self.hass, signal_quake(self._entry_id), self._update))
-
-    @callback
-    def _update(self) -> None:
-        self.async_write_ha_state()
-
-    @property
-    def available(self) -> bool:
-        return super().available and self.runtime.quake.enabled
 
     @property
     def native_value(self) -> str | None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .coordinator import JmaConfigEntry, JmaRuntime
 
 
@@ -28,4 +28,5 @@ class JmaEntity(Entity):
             model=f"{cfg.office} / {cfg.area} {cfg.area_name}",
             entry_type=DeviceEntryType.SERVICE,
             configuration_url="https://www.jma.go.jp/bosai/",
+            sw_version=VERSION,  # the installed release of this integration, shown on the device page
         )

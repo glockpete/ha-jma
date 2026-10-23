@@ -195,6 +195,11 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
         self.last_error_type: type[BaseException] | None = None
         # First poll: feed health measures "silent since" from here when nothing ever succeeded.
         self.first_try: datetime | None = None
+        # The run of failed polls since the last good one, for the log: one WARNING for a payload surprise, DEBUG
+        # while the run goes on, one INFO when data is back. (HA's DataUpdateCoordinator already logs once, and
+        # once on recovery, when UpdateFailed is raised; nothing is added for that path.)
+        self._failed_polls = 0
+        self._payload_warned = False
 
     async def _fetch(self) -> T:
         raise NotImplementedError
@@ -208,8 +213,12 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
             # Parser surprises (a ragged array, a bad time string, a field that changed its type, a number
             # too big for a float, a CSV field over the reader's limit) get the same keep-last-good
             # treatment as fetch errors instead of HA's immediate unavailable and a traceback in the log.
+            self._failed_polls += 1
             if not isinstance(err, JmaError):
-                _LOGGER.warning("%s: unexpected payload: %r", self.name, err)
+                # Once per run of failures, not once per poll: the feed repeats the same surprise every interval.
+                log = _LOGGER.debug if self._payload_warned else _LOGGER.warning
+                self._payload_warned = True
+                log("%s: unexpected payload: %r", self.name, err)
             self.last_error = str(err)
             self.last_error_type = type(err)
             now = dt_util.utcnow()
@@ -222,6 +231,10 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
                 _LOGGER.debug("%s: keeping last good data: %s", self.name, err)
                 return self.data
             raise UpdateFailed(str(err)) from err
+        if self._payload_warned:
+            _LOGGER.info("%s: data is back after %d failed poll(s)", self.name, self._failed_polls)
+        self._failed_polls = 0
+        self._payload_warned = False
         self.last_ok = dt_util.utcnow()
         self.last_error = None
         self.last_error_type = None

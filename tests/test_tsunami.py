@@ -1134,6 +1134,7 @@ async def test_expiry_through_the_ten_minute_timer_with_the_socket_silent(
     seen, get_json = _wire(hass, entry, aioclient_mock, msg)
     await setup(hass, entry)
     qc = entry.runtime_data.quake
+    qc.connected = True  # "silent" is a socket that is up and says nothing; one that never connected reads unavailable
     qc.handle(msg, dt_util.now())
     await hass.async_block_till_done()
     assert hass.states.get("sensor.jma_chiyoda_tsunami").state == "warning"
