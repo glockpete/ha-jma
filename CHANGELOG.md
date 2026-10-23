@@ -10,7 +10,9 @@ and the project uses [semantic versioning](https://semver.org/).
 - **Release asset.** Every published release carries `jma.zip`, the integration folder zipped by the new
   `release.yml` workflow. `hacs.json` names it (`zip_release`, `filename`), so HACS and the Home Assistant
   Marketplace fetch one file instead of every file of the folder, and count the downloads. The asset was added to
-  the 0.6.0 to 0.7.0 releases by hand, so those versions stay installable.
+  the 0.6.0 to 0.7.0 releases by hand, so those versions stay installable. If the workflow fails (the manifest
+  version doesn't match the tag, or the zip or upload fails), it puts the release back to draft, so HACS never
+  offers a version without its asset.
 
 ### Changed
 

@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+import yaml
+
 from custom_components.jma.const import USER_AGENT, VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,10 +85,19 @@ def test_hacs_json_holds_name_country_minimum_version_and_the_release_asset():
 
 
 def test_the_release_workflow_attaches_the_asset_hacs_json_names():
-    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    hacs = _load(ROOT / "hacs.json")
-    assert workflow.count(hacs["filename"]) >= 2  # zipped, then uploaded
-    assert "types: [published]" in workflow  # every published release gets its asset
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8"))
+    filename = _load(ROOT / "hacs.json")["filename"]
+    triggers = workflow[True]  # YAML 1.1 reads the key "on" as true
+    assert triggers["release"]["types"] == ["published"]  # every published release gets its asset
+    runs = [step["run"] for step in workflow["jobs"]["asset"]["steps"] if "run" in step]
+    assert any(f"zip -r ../../{filename} ." in run for run in runs)
+    # upload, not create: a manual run with a tag that has no release must fail, not publish one
+    upload = next(step for step in workflow["jobs"]["asset"]["steps"] if step.get("name", "").startswith("Upload"))
+    assert upload["run"] == f'gh release upload "$TAG" {filename} --clobber'
+    # the release is public before the job runs, so a failed job must hide it again
+    last = workflow["jobs"]["asset"]["steps"][-1]
+    assert last["if"] == "failure() && github.event_name == 'release'"
+    assert last["run"] == 'gh release edit "$TAG" --draft=true'
 
 
 def test_the_name_says_it_is_unofficial_in_every_place_a_user_sees_it():

@@ -3,7 +3,10 @@ name: Release
 # Attaches jma.zip, the integration folder zipped, to every published release. hacs.json names that asset
 # (zip_release + filename), so HACS and the Home Assistant Marketplace download one file instead of every file
 # of the folder, and count its downloads. Borrowed from HACS's own .github/workflows/publish.yml.
-# Run it by hand (workflow_dispatch, with the tag) to add the asset to an older release.
+# GitHub runs this only once the release is public, so if any step fails the release goes back to draft: HACS
+# would otherwise offer a version it can't download.
+# Run it by hand (workflow_dispatch, with the tag) to add the asset to an older release. That run only uploads:
+# it fails when the tag has no release, and it never creates or publishes one.
 
 on:
   release:
@@ -20,18 +23,20 @@ permissions:
 
 jobs:
   asset:
-    name: Attach jma.zip to the release
+    name: Attach the asset to the release
     runs-on: "ubuntu-latest"
     permissions:
       contents: write
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"  # v7.0.1
         with:
           ref: ${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
-      # HACS and the Marketplace compare the two, so a release whose manifest says another version gets no asset
+      # HACS and the Marketplace compare the two
       - name: The manifest version must equal the tag
         run: |
           version="$(jq -r .version custom_components/jma/manifest.json)"
@@ -45,8 +50,9 @@ jobs:
           cd custom_components/jma
           zip -r ../../jma.zip . -x '*/__pycache__/*' '*.pyc'
           unzip -l ../../jma.zip
+      # gh release upload fails when the tag has no release, so a manual run can't create one
       - name: Upload the asset to the release
-        uses: "softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64"  # v3.0.3
-        with:
-          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
-          files: jma.zip
+        run: gh release upload "$TAG" jma.zip --clobber
+      - name: Put the release back to draft so HACS doesn't offer it without its asset
+        if: failure() && github.event_name == 'release'
+        run: gh release edit "$TAG" --draft=true
