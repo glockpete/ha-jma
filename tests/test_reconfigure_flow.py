@@ -1,6 +1,6 @@
 """HA quality scale `reconfiguration-flow`: the Reconfigure menu item of an entry picks the two AMeDAS stations again
-from the agency's current tables and Home Assistant's home, refreshes the names the entry was made with, and keeps the
-area (the unique id) and the debug option."""
+from the agency's current tables and Home Assistant's home, refreshes the area names the entry was made with, and
+keeps the area (the unique id), the title and the debug option."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ async def test_reconfigure_shows_the_stations_picked_now_and_updates_the_entry_i
     assert "update listener" not in caplog.text  # HA's usage report for update_reload_and_abort + a listener
 
 
-async def test_reconfigure_refreshes_names_the_title_and_the_stations_from_the_current_tables(
+async def test_reconfigure_refreshes_the_names_and_the_stations_from_the_current_tables_and_keeps_the_title(
         tokyo: HomeAssistant, aioclient_mock) -> None:
     hass = tokyo
     stale = {**ENTRY_DATA, "area_name": "old", "area_name_ja": "old", "class10": "000000",
@@ -74,8 +74,19 @@ async def test_reconfigure_refreshes_names_the_title_and_the_stations_from_the_c
     result = await hass.config_entries.flow.async_configure((await _start(hass, entry))["flow_id"], {})
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
     assert entry.data == ENTRY_DATA  # office and area as they were, everything else from the tables
-    assert entry.title == TITLE
+    assert entry.title == "JMA old"  # the title is the user's: Reconfigure does not write it
     assert entry.state is ConfigEntryState.NOT_LOADED  # an entry that was not set up is not set up by this
+
+
+async def test_reconfigure_keeps_a_title_the_user_chose(tokyo: HomeAssistant, aioclient_mock) -> None:
+    """A rename done in the Home Assistant UI is not overwritten by the automatic 'JMA <English name>'."""
+    hass = tokyo
+    entry = MockConfigEntry(domain=DOMAIN, title="Weather at home", unique_id=AREA, data=ENTRY_DATA)
+    entry.add_to_hass(hass)
+    mock_jma(aioclient_mock)
+    result = await hass.config_entries.flow.async_configure((await _start(hass, entry))["flow_id"], {})
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "reconfigure_successful"
+    assert entry.title == "Weather at home"
 
 
 async def test_an_entry_made_before_0_6_gains_its_japanese_area_name(tokyo: HomeAssistant, aioclient_mock) -> None:
@@ -138,3 +149,13 @@ def test_the_reconfigure_texts_exist_in_both_languages_with_the_placeholders() -
         for placeholder in ("{area}", "{primary}", "{secondary}"):
             assert placeholder in step["description"], (language, placeholder)
         assert config["abort"]["reconfigure_successful"] and config["abort"]["unique_id_mismatch"]
+
+
+def test_the_reconfigure_success_text_does_not_promise_a_reload() -> None:
+    """The entry reloads only when it is set up and its settings changed: an entry that is not loaded, or whose
+    stations came out the same, does not, so the text says what was done and nothing about what follows."""
+    texts = {language: json.loads((TRANSLATIONS / f"{language}.json").read_text(encoding="utf-8"))["config"]["abort"]
+             for language in ("en", "ja")}
+    assert texts["en"]["reconfigure_successful"] == "The stations and names were updated."
+    assert texts["ja"]["reconfigure_successful"] == "観測所と名称を更新しました。"
+    assert "再読み込み" not in texts["ja"]["reconfigure_successful"]

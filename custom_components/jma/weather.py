@@ -32,6 +32,13 @@ def _japan_today() -> date:
     return dt_util.utcnow().astimezone(JST).date()
 
 
+def _japan_hour_start() -> datetime:
+    """The start of the current hour in Japan. The hourly rows are Japan's hours (+09:00), so the hour is floored in JST
+    and not in the time zone Home Assistant is set to: in a zone with a half-hour offset (Asia/Kolkata +05:30,
+    Australia/Adelaide +09:30) that floor lands at :30 past the JST hour and would pick the next hour's row."""
+    return dt_util.utcnow().astimezone(JST).replace(minute=0, second=0, microsecond=0)
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: JmaConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
@@ -109,7 +116,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
         h = self.runtime.hourly
         if not h.last_update_success or not h.data:
             return None
-        start = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        start = _japan_hour_start()
         for row in h.data:
             if datetime.fromisoformat(row["datetime"]) >= start:
                 return row
@@ -241,7 +248,7 @@ class JmaWeather(JmaEntity, WeatherEntity):
         h = self.runtime.hourly
         if not h.last_update_success or not h.data:
             return None
-        start = dt_util.now().replace(minute=0, second=0, microsecond=0)
+        start = _japan_hour_start()
         return [
             row for row in h.data  # type: ignore[misc]
             if datetime.fromisoformat(row["datetime"]) >= start

@@ -74,11 +74,58 @@ def area_chain(area_json: dict[str, Any], class20: str) -> tuple[str, str]:
     return c10, area_json["class10s"][c10]["parent"]
 
 
-def device_title(area_json: dict[str, Any], class20: str) -> str:
-    en = area_json["class20s"][class20].get("enName") or class20
-    for suffix in (" City", " Ward", " Town", " Village"):
+# The suffixes JMA's English names end in, each with how big a kind of place it says (a city or ward before a town
+# before a village); a name with none of them ranks last.
+_SUFFIX_RANK = ((" City", 0), (" Ward", 0), (" Town", 1), (" Village", 2))
+
+
+def _english_name(row: Any, code: str) -> str:
+    """The `enName` of a class20 row; the code when the row has none (or is not a row)."""
+    name = row.get("enName") if isinstance(row, dict) else None
+    return name if isinstance(name, str) and name else code
+
+
+def _short_name(en: str) -> str:
+    for suffix, _ in _SUFFIX_RANK:
         en = en.removesuffix(suffix)
-    return f"JMA {en}"
+    return en
+
+
+def _rank(en: str) -> int:
+    return next((rank for suffix, rank in _SUFFIX_RANK if en.endswith(suffix)), len(_SUFFIX_RANK))
+
+
+def _region(area_json: dict[str, Any], class20: str) -> str | None:
+    """The English name of the forecast office a class20 belongs to ("Tokyo", "Yamanashi"), for the brackets in a
+    device title. JMA names an office after its prefecture; a trailing " Prefecture" and a bracketed note
+    ("Kagoshima (Excluding Amami)") are cut so that the title stays short. None when the table cannot say."""
+    try:
+        name = area_json["offices"][area_chain(area_json, class20)[1]]["enName"]
+    except (LookupError, TypeError, AttributeError):
+        return None
+    if not isinstance(name, str):
+        return None
+    return re.sub(r"\s*\(.*\)$", "", name.removesuffix(" Prefecture")).strip() or None
+
+
+def device_title(area_json: dict[str, Any], class20: str) -> str:
+    """"JMA <English name without City/Ward/Town/Village>". 102 of those names in JMA's table belong to more than one
+    municipality (Chuo is a ward of Tokyo and a city in Yamanashi): two entries with one title get one device name and
+    entity ids ending in _2. A shared name is therefore followed by its forecast office in brackets ("JMA Chuo
+    (Tokyo)"). The one exception is the biggest kind of place when it is alone in its kind (a city before a town before
+    a village): Chiyoda City keeps "JMA Chiyoda" and the Chiyoda Town in Gunma becomes "JMA Chiyoda (Gunma)", so the
+    plain title that people already have does not change. Where two places of one office still share the short name
+    (Fuchu City and Fuchu Town, both in Hiroshima) the whole English name is used."""
+    places = area_json["class20s"]
+    en = _english_name(places[class20], class20)
+    short = _short_name(en)
+    rivals = [code for code, row in places.items()
+              if code != class20 and _short_name(_english_name(row, code)) == short]
+    if all(_rank(en) < _rank(_english_name(places[code], code)) for code in rivals):
+        return f"JMA {short}"  # no rivals at all, or the only city among towns
+    region = _region(area_json, class20)
+    same_office = any(_region(area_json, code) == region for code in rivals)
+    return f"JMA {en if same_office else short} ({region or class20})"
 
 
 class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -180,9 +227,9 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """HA quality scale: reconfiguration-flow. Picks the two AMeDAS stations again from the current tables and
-        Home Assistant's home, and refreshes the names the entry was made with (an entry made before 0.6 has no
-        Japanese area name). The area stays: it is the entry's unique id. A station typed into Configure is dropped so
-        that the picked ones apply; the debug option stays."""
+        Home Assistant's home, and refreshes the area names the entry was made with (an entry made before 0.6 has no
+        Japanese area name). The area stays: it is the entry's unique id, and so does the entry's title. A station
+        typed into Configure is dropped so that the picked ones apply; the debug option stays."""
         entry = self._get_reconfigure_entry()
         area = entry.data[CONF_AREA]
         try:
@@ -191,7 +238,7 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="cannot_connect")
         self._stations = None
         try:
-            data, title, placeholders = self._describe(area)
+            data, _title, placeholders = self._describe(area)
         except _SHAPE_ERRORS as err:
             _LOGGER.warning("The JMA area list or the station table is not in the expected shape: %r", err)
             return self.async_abort(reason="cannot_connect")
@@ -208,7 +255,8 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
             entry,
             data_updates={key: value for key, value in data.items() if key not in (CONF_OFFICE, CONF_AREA)},
             options=keep,
-            title=title,
+            # No title=: the title is the user's (they may have renamed the entry in Settings). A renamed municipality
+            # or a new way of naming applies to entries made from now on.
         )
 
     @staticmethod
@@ -222,6 +270,19 @@ STATION_ID = re.compile(r"[0-9]{5}")
 
 
 class JmaOptionsFlow(OptionsFlow):
+    async def _station_table(self) -> dict[str, Any] | None:
+        """The agency's AMeDAS station table, or None when it cannot be had: the ids are then accepted as typed, for the
+        user is not to be held up by JMA being down (the five-digit check has been made already)."""
+        try:
+            table = await JmaApi(async_get_clientsession(self.hass)).get_json(URL_AMEDAS_TABLE)
+        except JmaError as err:
+            _LOGGER.debug("amedastable unavailable, station ids accepted as typed: %s", err)
+            return None
+        if not isinstance(table, dict):
+            _LOGGER.debug("amedastable is not an object, station ids accepted as typed")
+            return None
+        return table
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         data = {**self.config_entry.data, **self.config_entry.options}
         errors: dict[str, str] = {}
@@ -233,6 +294,12 @@ class JmaOptionsFlow(OptionsFlow):
                 cleaned[key] = unicodedata.normalize("NFKC", str(user_input.get(key, "")).strip())
                 if not STATION_ID.fullmatch(cleaned[key]):
                     errors[key] = "invalid_station"
+            if not errors and (table := await self._station_table()) is not None:
+                # A well-formed id that is not in the agency's table is a typo: it 404s and quietly moves every
+                # reading to the other station until the feed-problem sensor notices.
+                for key in (CONF_STATION_PRIMARY, CONF_STATION_SECONDARY):
+                    if cleaned[key] not in table:
+                        errors[key] = "unknown_station"
             if not errors:
                 return self.async_create_entry(data=cleaned)
             data = {**data, **cleaned}

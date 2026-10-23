@@ -31,8 +31,9 @@
     },
     "abort": {
       "already_configured": "この地域はすでに設定されています。",
+      "already_in_progress": "この地域の設定はすでに進行中です。",
       "cannot_connect": "気象庁のサーバーに接続できませんでした。",
-      "reconfigure_successful": "観測所と名称を更新しました。エントリーを再読み込みしています。",
+      "reconfigure_successful": "観測所と名称を更新しました。",
       "unique_id_mismatch": "このエントリーは作成時の地域と一致しません。代わりに地域を追加し直してください。"
     }
   },
@@ -53,7 +54,8 @@
       }
     },
     "error": {
-      "invalid_station": "AMeDAS の観測所番号は5桁の数字です（例：44071）。"
+      "invalid_station": "AMeDAS の観測所番号は5桁の数字です（例：44071）。",
+      "unknown_station": "この番号の AMeDAS 観測所は気象庁の観測所表にありません。番号を確認してください（例：44071）。"
     }
   },
   "entity": {

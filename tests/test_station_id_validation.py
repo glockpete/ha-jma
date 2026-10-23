@@ -7,6 +7,9 @@ from __future__ import annotations
 import pytest
 from homeassistant.core import HomeAssistant
 
+from custom_components.jma.const import URL_AMEDAS_TABLE
+
+from .conftest import mock_jma
 from .test_options_flow_http import FLOW, _client
 
 FULL_WIDTH = "４４１３２"  # U+FF14 U+FF14 U+FF11 U+FF13 U+FF12
@@ -76,3 +79,68 @@ async def test_both_bad_fields_are_flagged_together(tokyo: HomeAssistant, aiocli
     client = await _client(tokyo, aioclient_mock, entry, hass_client)
     result = await _submit(client, entry, ARABIC_INDIC, "")
     assert result["errors"] == {"station_primary": "invalid_station", "station_secondary": "invalid_station"}
+
+
+# ---- an id of the right shape that the agency's station table does not hold ----
+
+
+async def test_an_id_that_is_not_in_the_station_table_is_refused_for_that_field(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client) -> None:
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    before = aioclient_mock.call_count
+    result = await _submit(client, entry, "12345", "44132")  # five digits, but no AMeDAS station has this id
+    assert [c for c in aioclient_mock.mock_calls[before:] if str(c[1]) == URL_AMEDAS_TABLE]  # the table was asked for
+    assert result["type"] == "form" and result["errors"] == {"station_primary": "unknown_station"}
+    assert dict(entry.options) == {}  # nothing was saved
+    fields = {f["name"]: f for f in result["data_schema"]}
+    assert fields["station_primary"]["default"] == "12345"  # what was typed stays in the field
+
+
+async def test_both_unknown_ids_are_flagged_together_and_a_known_id_is_not(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client) -> None:
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    result = await _submit(client, entry, "12345", "12346")
+    assert result["errors"] == {"station_primary": "unknown_station", "station_secondary": "unknown_station"}
+    result = await _submit(client, entry, "44132", "12346")
+    assert result["errors"] == {"station_secondary": "unknown_station"}
+
+
+async def test_a_full_width_id_is_looked_up_in_the_table_as_ascii(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client) -> None:
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    result = await _submit(client, entry, FULL_WIDTH, "６２０１６")  # 44132 and 62016, both in the table
+    assert result["type"] == "create_entry", result
+
+
+async def test_a_badly_shaped_id_is_refused_without_asking_for_the_table(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client) -> None:
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    before = aioclient_mock.call_count
+    result = await _submit(client, entry, "4413", "44132")
+    assert result["errors"] == {"station_primary": "invalid_station"}
+    table_calls = [c for c in aioclient_mock.mock_calls[before:] if str(c[1]) == URL_AMEDAS_TABLE]
+    assert table_calls == []
+
+
+async def test_the_ids_are_accepted_as_typed_when_the_station_table_cannot_be_fetched(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client, caplog) -> None:
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(URL_AMEDAS_TABLE, status=503)  # the first registration wins: before mock_jma
+    mock_jma(aioclient_mock)
+    with caplog.at_level("DEBUG", logger="custom_components.jma.config_flow"):
+        result = await _submit(client, entry, "12345", "12346")  # unknown to the real table, but JMA is down
+    assert result["type"] == "create_entry", result
+    await tokyo.async_block_till_done()
+    assert entry.options["station_primary"] == "12345" and entry.options["station_secondary"] == "12346"
+    assert [r.message for r in caplog.records if "station ids accepted as typed" in r.message]
+
+
+async def test_the_ids_are_accepted_as_typed_when_the_station_table_is_not_an_object(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client) -> None:
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(URL_AMEDAS_TABLE, json=["not", "a", "table"])
+    mock_jma(aioclient_mock)
+    result = await _submit(client, entry, "12345", "44132")
+    assert result["type"] == "create_entry", result

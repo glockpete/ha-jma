@@ -14,8 +14,8 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, Platform
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import issue_registry as ir
@@ -189,8 +189,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
             if isinstance(name, str) and name)
         await runtime.heat_alert.async_refresh()
 
-    await asyncio.gather(names_then_heat(), *(
-        c.async_refresh() for c in runtime.coordinators if c is not runtime.heat_alert))
+    # Two phases. The four core feeds first, because "no route to JMA" is decided from them alone: the heat-alert and
+    # typhoon files come from other hosts and can answer while JMA does not, and their first poll DECIDES an alert,
+    # saves it to the memory (a delayed write nothing cancels) and queues the event; raising afterwards throws the queue
+    # away, and after the retry the memory would say "announced" for an event nobody saw.
+    core = (runtime.forecast, runtime.warnings, runtime.amedas, runtime.nowcast)
+    await asyncio.gather(*(c.async_refresh() for c in core))
     # HA quality scale (test-before-setup): with no route to JMA at all (all four core feeds failed to fetch) the entry
     # is not set up; Home Assistant retries with back-off and shows "Retrying setup". Anything else (one feed up, a
     # file that does not parse, an optional feed down) keeps setting up: entities wait for their feed. What was
@@ -199,6 +203,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
     # the platforms and the timers come after this point.
     if runtime.unreachable:
         raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="jma_unreachable")
+    await asyncio.gather(names_then_heat(), *(
+        c.async_refresh() for c in runtime.coordinators if c is not runtime.heat_alert and c not in core))
     # Decided before the entities exist, so the earthquake sensor starts with the right availability.
     sockets: set[str] = hass.data.setdefault(DOMAIN, {}).setdefault("quake_sockets", set())
     issue_id = f"no_quake_socket_{entry.entry_id}"
@@ -239,6 +245,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         # An entry without an earthquake connection has no tsunami bulletins to expire: no timer.
         entry.async_on_unload(async_track_time_interval(hass, tsunami_tick, TSUNAMI_TICK))
 
+    @callback
+    def core_config_updated(event: Event) -> None:
+        """The user moved the home in Settings: the rain-nowcast tile is read for the coordinates copied into `cfg` at
+        setup, so the entry sets up again to read the new ones. The event data is the dict of keys that were changed
+        (Config.async_update), and the core has already stored the new values; any other change (unit system, time
+        zone, name, elevation) is not ours."""
+        changed = event.data or {}
+        if "latitude" not in changed and "longitude" not in changed:
+            return
+        if (hass.config.latitude, hass.config.longitude) == (cfg.latitude, cfg.longitude):
+            return  # saved again with the place it already had
+        _LOGGER.debug("Reloading %s: Home Assistant's home moved", entry.title)
+        hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    entry.async_on_unload(hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, core_config_updated))
     entry.async_on_unload(entry.add_update_listener(_reload))
     return True
 

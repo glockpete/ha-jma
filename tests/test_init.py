@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from datetime import timedelta
+from pathlib import Path
 
 import aiohttp
 import pytest
@@ -22,6 +24,8 @@ from custom_components.jma.parse_forecast import condition_for
 from .conftest import AREA, ENTRY_DATA, mock_jma, setup
 from .helpers import clone, load_json
 from .test_options_flow_http import FLOW, _client
+
+COMPONENT = Path(__file__).parent.parent / "custom_components" / "jma"
 
 
 async def test_config_flow_picks_stations(tokyo: HomeAssistant, aioclient_mock) -> None:
@@ -93,6 +97,28 @@ async def test_config_flow_aborts_when_the_area_is_already_configured(
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"area": AREA})
     assert result["type"] is FlowResultType.ABORT and result["reason"] == "already_configured"
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_a_second_flow_for_an_area_whose_setup_is_open_aborts_as_in_progress(
+        tokyo: HomeAssistant, aioclient_mock) -> None:
+    """async_set_unique_id (area step) refuses a second flow for the area while the first sits on the confirm form; the
+    reason `already_in_progress` has a text in both languages (translations: config.abort)."""
+    hass = tokyo
+    mock_jma(aioclient_mock)
+    first = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    first = await hass.config_entries.flow.async_configure(first["flow_id"], {"office": "130000"})
+    first = await hass.config_entries.flow.async_configure(first["flow_id"], {"area": AREA})
+    assert first["step_id"] == "confirm"  # the first flow is open, nothing is stored yet
+    second = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    second = await hass.config_entries.flow.async_configure(second["flow_id"], {"office": "130000"})
+    second = await hass.config_entries.flow.async_configure(second["flow_id"], {"area": AREA})
+    assert second["type"] is FlowResultType.ABORT and second["reason"] == "already_in_progress"
+    for language in ("en", "ja"):
+        texts = json.loads((COMPONENT / "translations" / f"{language}.json").read_text(encoding="utf-8"))
+        assert texts["config"]["abort"]["already_in_progress"], language
+    # the first flow is not harmed by it
+    first = await hass.config_entries.flow.async_configure(first["flow_id"], {})
+    assert first["type"] is FlowResultType.CREATE_ENTRY and first["data"] == ENTRY_DATA
 
 
 async def test_options_flow_recovers_in_the_same_flow_after_an_invalid_station_id(

@@ -78,7 +78,7 @@ class _CoordSensor(JmaEntity, CoordinatorEntity, SensorEntity):
 
 
 class WarningLevelSensor(_CoordSensor):
-    """0 = nothing in force; 2..5 = highest JMA level for the area."""
+    """0 = nothing in force; 2..5 = highest JMA level for the area; unknown when the file does not hold the area."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -88,7 +88,9 @@ class WarningLevelSensor(_CoordSensor):
     @property
     def native_value(self) -> int | None:
         d = self.coordinator.data
-        return d.area.level if d else None
+        # A file without the entry's area says nothing about it: 0 would read as "nothing in force" when in truth
+        # nothing is known. The attributes still carry area_missing.
+        return d.area.level if d and not d.area.area_missing else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:

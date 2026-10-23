@@ -31,8 +31,9 @@
     },
     "abort": {
       "already_configured": "This area is already set up.",
+      "already_in_progress": "A setup for this area is already in progress.",
       "cannot_connect": "Could not reach the Japan Meteorological Agency's server.",
-      "reconfigure_successful": "The stations and names were updated and the entry is reloading.",
+      "reconfigure_successful": "The stations and names were updated.",
       "unique_id_mismatch": "This entry does not belong to the area it was made for. Add the area again instead."
     }
   },
@@ -53,7 +54,8 @@
       }
     },
     "error": {
-      "invalid_station": "An AMeDAS station id is five digits, for example 44071."
+      "invalid_station": "An AMeDAS station id is five digits, for example 44071.",
+      "unknown_station": "No AMeDAS station has this id in the agency's table. Check the id, for example 44071."
     }
   },
   "entity": {

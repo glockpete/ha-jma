@@ -53,18 +53,28 @@ def silent_station(rt: JmaRuntime, now: datetime) -> tuple[str, str, datetime] |
     return None
 
 
+ERROR_TEXT_MAX = 200
+
+
+def clip_error(error: object) -> str:
+    """An error text as it goes into a reason: the reasons are attributes of the entity, written to the recorder every
+    minute, and a stored error (a server's whole HTML page, say) has no length of its own."""
+    text = str(error)
+    return text if len(text) <= ERROR_TEXT_MAX else text[:ERROR_TEXT_MAX - 1] + "…"
+
+
 def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
     """feed -> reason when unhealthy right now, else None."""
     out: dict[str, str | None] = {}
 
     w = rt.warnings
     if w.last_ok is None or now - w.last_ok > WARNINGS_MAX_SILENCE:
-        out["warnings"] = f"r8 warnings not fetched since {w.last_ok}: {w.last_error}"
+        out["warnings"] = f"r8 warnings not fetched since {w.last_ok}: {clip_error(w.last_error)}"
     elif w.data and w.data.stale:
         out["warnings"] = f"r8 JSON behind the XML feed for {', '.join(w.data.stale)}"
     elif w.xml_ok is None or now - w.xml_ok > XML_MAX_SILENCE:
         # Without extra.xml the r8-freeze check (the older warning file stops updating) is off; say so.
-        out["warnings"] = f"XML cross-check not fetched since {w.xml_ok}: {w.xml_error}"
+        out["warnings"] = f"XML cross-check not fetched since {w.xml_ok}: {clip_error(w.xml_error)}"
     else:
         out["warnings"] = None
 
@@ -80,12 +90,12 @@ def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
         sid, other, since = silent
         out["amedas_station"] = (
             f"AMeDAS {sid} has answered nothing since {since.isoformat()} while {other} "
-            f"answers: {rt.amedas.station_error.get(sid)}")
+            f"answers: {clip_error(rt.amedas.station_error.get(sid))}")
 
     h = rt.hourly
     since = h.last_ok or h.first_try
     if since is not None and now - since > HEALTH_HOURLY_MAX_AGE:
-        out["hourly"] = f"Open-Meteo hourly not fetched since {h.last_ok}: {h.last_error}"
+        out["hourly"] = f"Open-Meteo hourly not fetched since {h.last_ok}: {clip_error(h.last_error)}"
     else:
         out["hourly"] = None
 

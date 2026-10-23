@@ -24,7 +24,7 @@ from custom_components.jma.const import (
 from custom_components.jma.errors import JmaFetchError
 from custom_components.jma.memory import AlertMemory
 
-from .conftest import mock_jma
+from .conftest import mock_heat_alert, mock_jma
 
 OFFICE = "130000"
 NOT_JSON = "<html>maintenance</html>"
@@ -153,3 +153,48 @@ async def test_last_error_keeps_its_text_and_a_good_poll_clears_the_type(
     mock_jma(aioclient_mock)
     await forecast.async_refresh()
     assert forecast.last_error is None and forecast.last_error_type is None
+
+
+async def test_heat_alert_decided_in_the_failed_attempt_is_still_delivered_after_the_retry(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer, hass_storage) -> None:
+    """The four JMA core files fail to fetch while the Ministry of the Environment's heat-alert file (another host)
+    answers with a real alert. The core feeds are polled first and the raise comes before the heat-alert coordinator
+    has polled: an alert decided in an attempt that is thrown away would be written to the memory (a delayed write
+    nothing cancels) and its queued event discarded, so that after the retry the memory said 'announced' for an
+    event nobody saw."""
+    hass = tokyo
+    freezer.move_to("2026-07-20T08:10:00+00:00")  # 17:10 JST, the day of the real alert file
+    _no_route(aioclient_mock, _core_urls())
+    mock_heat_alert(aioclient_mock, {(20260720, 17): "alert_20260720_17.csv"})
+    mock_jma(aioclient_mock)
+    await _first_setup(hass, entry)
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+
+    freezer.tick(timedelta(seconds=3))  # AlertMemory.SAVE_DELAY_S is 2: a delayed write would fire now
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    aioclient_mock.clear_requests()
+    mock_heat_alert(aioclient_mock, {(20260720, 17): "alert_20260720_17.csv"})
+    mock_jma(aioclient_mock)  # the route is back
+    freezer.tick(timedelta(seconds=30))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    async with entry.setup_lock:
+        pass
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.states.get("sensor.jma_chiyoda_heat_alert").state == "alert"  # the alert is real and in force
+    # nothing was delivered in the failed attempt: the heat_alert event reaches the event entity now
+    assert hass.states.get("event.jma_chiyoda_alerts").attributes.get("event_type") == "heat_alert"
+
+
+async def test_the_optional_feeds_are_not_polled_while_the_core_feeds_decide_the_attempt_fails(
+        tokyo: HomeAssistant, aioclient_mock, entry) -> None:
+    """Two phases: with no route to JMA the heat-alert, typhoon and the other optional coordinators have not polled."""
+    hass = tokyo
+    _no_route(aioclient_mock, _core_urls())
+    mock_jma(aioclient_mock)
+    await _first_setup(hass, entry)
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    asked = {str(call[1]) for call in aioclient_mock.mock_calls}
+    assert not [url for url in asked if "heat" in url.lower() or "typhoon" in url.lower() or "wbgt" in url.lower()]
