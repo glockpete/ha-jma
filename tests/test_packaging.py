@@ -27,7 +27,16 @@ def _load(path: Path):
 def test_english_and_japanese_translations_have_the_same_keys():
     en = set(_keys(_load(COMPONENT / "translations" / "en.json")))
     ja = set(_keys(_load(COMPONENT / "translations" / "ja.json")))
-    assert en == ja and len(en) == 61  # the interface texts and the title
+    assert en == ja and len(en) == 75  # the interface texts and the title
+
+
+def test_every_form_field_has_a_data_description_in_both_languages():
+    """HA quality scale `config-flow`: each field of a form says what it is for and where its value comes from."""
+    for language in ("en", "ja"):
+        translations = _load(COMPONENT / "translations" / f"{language}.json")
+        for section in ("config", "options"):
+            for step_id, step in translations[section]["step"].items():
+                assert set(step.get("data", {})) == set(step.get("data_description", {})), (language, section, step_id)
 
 
 def test_translation_placeholders_match():

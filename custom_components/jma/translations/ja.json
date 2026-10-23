@@ -6,22 +6,34 @@
         "title": "気象庁 予報区",
         "data": {
           "office": "府県予報区"
+        },
+        "data_description": {
+          "office": "お住まいの地域の予報と警報を発表する、府県単位の予報担当官署です。"
         }
       },
       "area": {
         "title": "警報の対象地域",
         "data": {
           "area": "警報の対象とする市区町村"
+        },
+        "data_description": {
+          "area": "警報を読み取る市区町村です。選んだ予報区の一覧から選びます。"
         }
       },
       "confirm": {
         "title": "確認",
         "description": "{area}の警報を表示します。\n\n観測：{primary}。気圧と欠測値の補完には {secondary} を使います。"
+      },
+      "reconfigure": {
+        "title": "観測所を選び直す",
+        "description": "警報は引き続き{area}です。\n\n気象庁の最新の表では、観測は {primary}、気圧と欠測値の補完には {secondary} になります。\n\n送信すると、この観測所を使い、地域名も更新します。設定画面で入力した観測所のIDは置き換えられます。"
       }
     },
     "abort": {
       "already_configured": "この地域はすでに設定されています。",
-      "cannot_connect": "気象庁のサーバーに接続できませんでした。"
+      "cannot_connect": "気象庁のサーバーに接続できませんでした。",
+      "reconfigure_successful": "観測所と名称を更新しました。エントリーを再読み込みしています。",
+      "unique_id_mismatch": "このエントリーは作成時の地域と一致しません。代わりに地域を追加し直してください。"
     }
   },
   "options": {
@@ -32,6 +44,11 @@
           "station_primary": "主なアメダス観測所のID",
           "station_secondary": "補助のアメダス観測所のID（種別A）",
           "debug_simulate": "テスト用アクション jma.simulate を有効にする"
+        },
+        "data_description": {
+          "station_primary": "気温を観測している最寄りのアメダス観測所です。観測値はまずこの観測所のものを使います。",
+          "station_secondary": "最寄りの種別Aの観測所です。気圧と、主な観測所が観測していない値の補完に使います。",
+          "debug_simulate": "jma.simulate アクションでこのエントリーにテスト用のアラートを発生させられるようにします。通常はオフのままにしてください。"
         }
       }
     },
@@ -144,6 +161,9 @@
     }
   },
   "exceptions": {
+    "jma_unreachable": {
+      "message": "気象庁のサーバーに接続できませんでした。Home Assistant が再試行します。"
+    },
     "simulate_entry_not_found": {
       "message": "そのIDの読み込み済みの JMA エントリーがありません。"
     },
@@ -152,6 +172,16 @@
     },
     "simulate_no_debug_entry": {
       "message": "デバッグ設定が有効な JMA エントリーがありません。いずれかのエントリーのオプションで「テスト用アクション jma.simulate を有効にする」をオンにしてください。"
+    }
+  },
+  "issues": {
+    "no_quake_socket": {
+      "title": "{title} は地震情報に接続していません",
+      "description": "地震情報サービス（P2P地震情報）は、IPアドレスごとに {limit} 接続までです。その接続を他の JMA エントリーが使っています。{title} は、いずれかを削除または無効にするまで地震のデータを表示しません。接続が空くと、自動的にその接続を使います。"
+    },
+    "station_silent": {
+      "title": "アメダス観測所 {station} から観測が届きません",
+      "description": "アメダス観測所 {station} から、{title} にしばらく観測が届いていません。もう一方の観測所は応答しています。観測所が廃止されたか、IDが変わった可能性があります。エントリーの設定で別の観測所のIDを入力するか、再設定を実行して最寄りの観測所を選び直してください。"
     }
   }
 }

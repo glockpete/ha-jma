@@ -16,8 +16,9 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ConfigEntryNotReady, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
@@ -190,8 +191,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
 
     await asyncio.gather(names_then_heat(), *(
         c.async_refresh() for c in runtime.coordinators if c is not runtime.heat_alert))
+    # HA quality scale (test-before-setup): with no route to JMA at all (all four core feeds failed to fetch) the entry
+    # is not set up; Home Assistant retries with back-off and shows "Retrying setup". Anything else (one feed up, a
+    # file that does not parse, an optional feed down) keeps setting up: entities wait for their feed. What was
+    # registered above (the memory's started-listener) is undone by Home Assistant when this raises
+    # (ConfigEntry.async_setup runs the on-unload callbacks of an entry that did not set up); the earthquake socket,
+    # the platforms and the timers come after this point.
+    if runtime.unreachable:
+        raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="jma_unreachable")
     # Decided before the entities exist, so the earthquake sensor starts with the right availability.
     sockets: set[str] = hass.data.setdefault(DOMAIN, {}).setdefault("quake_sockets", set())
+    issue_id = f"no_quake_socket_{entry.entry_id}"
     if len(sockets) < MAX_QUAKE_SOCKETS:
         sockets.add(entry.entry_id)
 
@@ -202,11 +212,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
                 _offer_free_socket(hass)
 
         entry.async_on_unload(release_socket)
+        ir.async_delete_issue(hass, DOMAIN, issue_id)  # a connection came free since the last setup
     else:
         runtime.quake.enabled = False
         _LOGGER.warning(
             "No earthquake connection for %s: the earthquake service allows %d connections per IP address and "
             "%d are in use by other entries", entry.title, MAX_QUAKE_SOCKETS, MAX_QUAKE_SOCKETS)
+        # The log line is easy to miss: the repairs page tells the user why this entry has no earthquake data. It
+        # goes when the entry unloads (a reload asks again, a freed connection then lets it set up with one).
+        ir.async_create_issue(
+            hass, DOMAIN, issue_id, is_fixable=False, severity=ir.IssueSeverity.WARNING,
+            translation_key="no_quake_socket",
+            translation_placeholders={"title": entry.title, "limit": str(MAX_QUAKE_SOCKETS)})
+        entry.async_on_unload(lambda: ir.async_delete_issue(hass, DOMAIN, issue_id))
     entry.runtime_data = runtime
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     runtime.set_alerts_ready()  # events held from the first polls (warning_in_force, ...) go out now

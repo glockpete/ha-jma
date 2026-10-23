@@ -8,11 +8,13 @@ from typing import Any
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    DOMAIN,
     HEALTH_AMEDAS_MAX_AGE,
     HEALTH_FORECAST_MAX_AGE,
     HEALTH_HOURLY_MAX_AGE,
@@ -33,6 +35,22 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: JmaConfigEntry, async_add_entities: AddConfigEntryEntitiesCallback
 ) -> None:
     async_add_entities([FeedProblem(entry)])
+
+
+def silent_station(rt: JmaRuntime, now: datetime) -> tuple[str, str, datetime] | None:
+    """(silent station id, the station that answers, silent since) when one of the two AMeDAS stations has answered
+    nothing for longer than HEALTH_AMEDAS_MAX_AGE while the other one answers, else None."""
+    a = rt.amedas
+    if a.cfg.station_primary == a.cfg.station_secondary:
+        return None
+    pair = (a.cfg.station_primary, a.cfg.station_secondary)
+    for sid, other in (pair, pair[::-1]):
+        since = a.station_ok.get(sid) or a.first_try
+        other_ok = a.station_ok.get(other)
+        if (since is not None and now - since > HEALTH_AMEDAS_MAX_AGE
+                and other_ok is not None and now - other_ok <= HEALTH_AMEDAS_MAX_AGE):
+            return sid, other, since
+    return None
 
 
 def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
@@ -57,19 +75,12 @@ def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
         out["amedas"] = None
 
     # One station down for days is invisible above: the other one fills every value.
-    a = rt.amedas
     out["amedas_station"] = None
-    if a.cfg.station_primary != a.cfg.station_secondary:
-        pair = (a.cfg.station_primary, a.cfg.station_secondary)
-        for sid, other in (pair, pair[::-1]):
-            since = a.station_ok.get(sid) or a.first_try
-            other_ok = a.station_ok.get(other)
-            if (since is not None and now - since > HEALTH_AMEDAS_MAX_AGE
-                    and other_ok is not None and now - other_ok <= HEALTH_AMEDAS_MAX_AGE):
-                out["amedas_station"] = (
-                    f"AMeDAS {sid} has answered nothing since {since.isoformat()} while {other} "
-                    f"answers: {a.station_error.get(sid)}")
-                break
+    if (silent := silent_station(rt, now)) is not None:
+        sid, other, since = silent
+        out["amedas_station"] = (
+            f"AMeDAS {sid} has answered nothing since {since.isoformat()} while {other} "
+            f"answers: {rt.amedas.station_error.get(sid)}")
 
     h = rt.hourly
     since = h.last_ok or h.first_try
@@ -106,6 +117,9 @@ class FeedProblem(JmaEntity, BinarySensorEntity):
         super().__init__(entry, "feed_problem")
         self._tracker = HealthTracker()
         self._state: dict[str, dict] = {}
+        self._issue_id = f"station_silent_{entry.entry_id}"
+        self._title = entry.title
+        self._issue_station: str | None = None  # the station the repair issue is raised for, if any
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -113,6 +127,7 @@ class FeedProblem(JmaEntity, BinarySensorEntity):
             async_track_time_interval(self.hass, self._tick, timedelta(minutes=1)))
         for coordinator in self.runtime.coordinators:
             self.async_on_remove(coordinator.async_add_listener(self._refresh))
+        self.async_on_remove(self._clear_issue)
         self._refresh()
 
     @callback
@@ -121,9 +136,33 @@ class FeedProblem(JmaEntity, BinarySensorEntity):
 
     @callback
     def _refresh(self) -> None:
-        self._state = self._tracker.evaluate(
-            dt_util.utcnow(), feed_conditions(self.runtime, dt_util.utcnow()))
+        now = dt_util.utcnow()
+        self._state = self._tracker.evaluate(now, feed_conditions(self.runtime, now))
+        self._sync_issue(now)
         self.async_write_ha_state()
+
+    @callback
+    def _sync_issue(self, now: datetime) -> None:
+        """A station silent past the grace is also a repair issue (HA quality scale: repair-issues): the user can fix
+        it by entering another station id or by running Reconfigure. It goes when the station answers again."""
+        station = None
+        if self._state["amedas_station"]["problem"] and (silent := silent_station(self.runtime, now)) is not None:
+            station = silent[0]
+        if station == self._issue_station:
+            return
+        if station is None:
+            self._clear_issue()
+            return
+        ir.async_create_issue(
+            self.hass, DOMAIN, self._issue_id, is_fixable=False, severity=ir.IssueSeverity.WARNING,
+            translation_key="station_silent",
+            translation_placeholders={"station": station, "title": self._title})
+        self._issue_station = station
+
+    @callback
+    def _clear_issue(self) -> None:
+        ir.async_delete_issue(self.hass, DOMAIN, self._issue_id)
+        self._issue_station = None
 
     @property
     def is_on(self) -> bool:

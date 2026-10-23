@@ -190,6 +190,9 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
         self.cfg = cfg
         self.last_ok: datetime | None = None
         self.last_error: str | None = None
+        # The class of the last failure (None after a good poll): setup reads it to tell "no route to JMA"
+        # (a fetch error) from a file that arrived but was not what the parser expects.
+        self.last_error_type: type[BaseException] | None = None
         # First poll: feed health measures "silent since" from here when nothing ever succeeded.
         self.first_try: datetime | None = None
 
@@ -208,6 +211,7 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
             if not isinstance(err, JmaError):
                 _LOGGER.warning("%s: unexpected payload: %r", self.name, err)
             self.last_error = str(err)
+            self.last_error_type = type(err)
             now = dt_util.utcnow()
             if (
                 self.data is not None
@@ -220,6 +224,7 @@ class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
             raise UpdateFailed(str(err)) from err
         self.last_ok = dt_util.utcnow()
         self.last_error = None
+        self.last_error_type = None
         return data
 
 
@@ -891,6 +896,16 @@ class JmaRuntime:
             self.forecast, self.hourly, self.amedas, self.warnings, self.nowcast,
             self.timeline, self.typhoon, self.wbgt, self.layers, self.japan, self.heat_alert,
         ]
+
+    @property
+    def unreachable(self) -> bool:
+        """True when every core feed (forecast, warnings, AMeDAS, nowcast) failed its latest poll with a fetch error:
+        no route to JMA. One feed that answered, a file that arrived but did not parse, or an optional feed that failed
+        does not count."""
+        core = (self.forecast, self.warnings, self.amedas, self.nowcast)
+        return all(
+            not c.last_update_success and c.last_error_type is not None and issubclass(c.last_error_type, JmaFetchError)
+            for c in core)
 
     def set_alerts_ready(self) -> None:
         """Called once the platforms are set up: events held from the first polls go out now."""

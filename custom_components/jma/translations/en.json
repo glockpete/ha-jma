@@ -6,22 +6,34 @@
         "title": "JMA forecast office",
         "data": {
           "office": "Forecast office (府県予報区)"
+        },
+        "data_description": {
+          "office": "The prefecture-level forecast office that publishes the forecast and warnings for your area."
         }
       },
       "area": {
         "title": "Warnings area",
         "data": {
           "area": "Ward / municipality for warnings (市区町村)"
+        },
+        "data_description": {
+          "area": "The ward or municipality the warnings are read for, from the list of that forecast office."
         }
       },
       "confirm": {
         "title": "Confirm",
         "description": "Warnings for {area}.\n\nObservations: {primary}, with {secondary} for pressure and any missing values."
+      },
+      "reconfigure": {
+        "title": "Pick the stations again",
+        "description": "Warnings stay for {area}.\n\nThe agency's tables now give: observations from {primary}, with {secondary} for pressure and any missing values.\n\nSubmit to use these stations and refresh the area names. A station id typed under Configure is replaced."
       }
     },
     "abort": {
       "already_configured": "This area is already set up.",
-      "cannot_connect": "Could not reach the Japan Meteorological Agency's server."
+      "cannot_connect": "Could not reach the Japan Meteorological Agency's server.",
+      "reconfigure_successful": "The stations and names were updated and the entry is reloading.",
+      "unique_id_mismatch": "This entry does not belong to the area it was made for. Add the area again instead."
     }
   },
   "options": {
@@ -32,6 +44,11 @@
           "station_primary": "Primary AMeDAS station id",
           "station_secondary": "Secondary AMeDAS station id (type A)",
           "debug_simulate": "Enable the jma.simulate test action"
+        },
+        "data_description": {
+          "station_primary": "The nearest AMeDAS station that measures temperature; its readings come first.",
+          "station_secondary": "The nearest type A station, used for pressure and for any value the primary station does not report.",
+          "debug_simulate": "Lets the jma.simulate action fire test alerts at this entry; leave it off in normal use."
         }
       }
     },
@@ -144,6 +161,9 @@
     }
   },
   "exceptions": {
+    "jma_unreachable": {
+      "message": "Could not reach the Japan Meteorological Agency's servers. Home Assistant will try again."
+    },
     "simulate_entry_not_found": {
       "message": "No loaded JMA entry has that id."
     },
@@ -152,6 +172,16 @@
     },
     "simulate_no_debug_entry": {
       "message": "No JMA entry has the debug option on. Switch on \"Enable the jma.simulate test action\" in the options of an entry."
+    }
+  },
+  "issues": {
+    "no_quake_socket": {
+      "title": "{title} has no earthquake connection",
+      "description": "The earthquake service (P2P地震情報) allows {limit} connections per IP address, and other JMA entries use them. {title} shows no earthquake data until one of them is removed or disabled; it then takes the free connection by itself."
+    },
+    "station_silent": {
+      "title": "AMeDAS station {station} is silent",
+      "description": "AMeDAS station {station} has sent no observation to {title} for a while, while its other station still answers. The station may have closed or changed its id. Open Configure on the entry and enter another station id, or run Reconfigure on the entry to pick the nearest stations again."
     }
   }
 }

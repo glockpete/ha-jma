@@ -1,4 +1,5 @@
-"""Config flow: forecast office -> warnings area (class20) -> confirm the auto-picked stations.
+"""Config flow: forecast office -> warnings area (class20) -> confirm the auto-picked stations. Reconfigure picks the
+stations again for an entry that exists.
 
 JMA's class20 boundary GeoJSON is chunked by bounding box (class20relm.json), so the ward is
 picked from a list rather than located from HA's home coordinates. AMeDAS stations are
@@ -140,39 +141,75 @@ class JmaConfigFlow(ConfigFlow, domain=DOMAIN):
                 options=options, mode=SelectSelectorMode.DROPDOWN)),
         }))
 
+    def _describe(self, area_code: str) -> tuple[dict[str, Any], str, dict[str, str]]:
+        """(entry data, title, description placeholders) for a class20 code, from the tables fetched by `_load` and
+        the stations nearest to Home Assistant's home. One place for the confirm step and Reconfigure, so what the
+        form shows is what is stored. A table of the wrong shape raises one of `_SHAPE_ERRORS`."""
+        if self._stations is None:
+            self._stations = pick_stations(
+                self._amedas, self.hass.config.latitude, self.hass.config.longitude)
+        primary, secondary, pkm, skm = self._stations
+        area_name = self._area_json["class20s"][area_code]["name"]
+        class10, office = area_chain(self._area_json, area_code)
+        data = {
+            CONF_OFFICE: office,
+            CONF_AREA: area_code,
+            "area_name": area_name,
+            CONF_AREA_NAME_JA: area_name,  # the quake part matches addresses with it
+            "class10": class10,
+            CONF_STATION_PRIMARY: primary,
+            CONF_STATION_SECONDARY: secondary,
+        }
+        placeholders = {
+            "area": f"{area_name} ({area_code})",
+            "primary": f"{self._amedas[primary]['kjName']} {primary} ({pkm:.1f} km)",
+            "secondary": f"{self._amedas[secondary]['kjName']} {secondary} ({skm:.1f} km)",
+        }
+        return data, device_title(self._area_json, area_code), placeholders
+
     async def async_step_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         assert self._area is not None
         try:
-            if self._stations is None:
-                self._stations = pick_stations(
-                    self._amedas, self.hass.config.latitude, self.hass.config.longitude)
-            primary, secondary, pkm, skm = self._stations
-            area = self._area_json["class20s"][self._area]
-            class10, office = area_chain(self._area_json, self._area)
-            title = device_title(self._area_json, self._area)
-            area_name = area["name"]
-            placeholders = {
-                "area": f"{area_name} ({self._area})",
-                "primary": f"{self._amedas[primary]['kjName']} {primary} ({pkm:.1f} km)",
-                "secondary": f"{self._amedas[secondary]['kjName']} {secondary} ({skm:.1f} km)",
-            }
+            data, title, placeholders = self._describe(self._area)
         except _SHAPE_ERRORS as err:
             _LOGGER.warning("The JMA area list or the station table is not in the expected shape: %r", err)
             return self.async_abort(reason="cannot_connect")
         if user_input is not None:
-            return self.async_create_entry(
-                title=title,
-                data={
-                    CONF_OFFICE: office,
-                    CONF_AREA: self._area,
-                    "area_name": area_name,
-                    CONF_AREA_NAME_JA: area_name,  # the quake part matches addresses with it
-                    "class10": class10,
-                    CONF_STATION_PRIMARY: primary,
-                    CONF_STATION_SECONDARY: secondary,
-                },
-            )
+            return self.async_create_entry(title=title, data=data)
         return self.async_show_form(step_id="confirm", description_placeholders=placeholders)
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """HA quality scale: reconfiguration-flow. Picks the two AMeDAS stations again from the current tables and
+        Home Assistant's home, and refreshes the names the entry was made with (an entry made before 0.6 has no
+        Japanese area name). The area stays: it is the entry's unique id. A station typed into Configure is dropped so
+        that the picked ones apply; the debug option stays."""
+        entry = self._get_reconfigure_entry()
+        area = entry.data[CONF_AREA]
+        try:
+            await self._load()  # at every call: a form left open for an hour must not apply an old table
+        except JmaError:
+            return self.async_abort(reason="cannot_connect")
+        self._stations = None
+        try:
+            data, title, placeholders = self._describe(area)
+        except _SHAPE_ERRORS as err:
+            _LOGGER.warning("The JMA area list or the station table is not in the expected shape: %r", err)
+            return self.async_abort(reason="cannot_connect")
+        if user_input is None:
+            return self.async_show_form(step_id="reconfigure", description_placeholders=placeholders)
+        await self.async_set_unique_id(area)
+        self._abort_if_unique_id_mismatch()
+        keep = {key: value for key, value in entry.options.items()
+                if key not in (CONF_STATION_PRIMARY, CONF_STATION_SECONDARY)}
+        # Not async_update_reload_and_abort: this entry has an update listener (__init__._reload) that reloads it when
+        # its settings changed, and Home Assistant 2026.9 logs a usage report (and 2026.12 breaks) for an entry that
+        # has both. An entry that is not set up has no listener and reads the new data when it next sets up.
+        return self.async_update_and_abort(
+            entry,
+            data_updates={key: value for key, value in data.items() if key not in (CONF_OFFICE, CONF_AREA)},
+            options=keep,
+            title=title,
+        )
 
     @staticmethod
     @callback
