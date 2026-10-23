@@ -15,7 +15,7 @@ from custom_components.jma.parse_nowcast import RainArming, rain_series
 from custom_components.jma.quake_ws import QuakeClient
 
 from .conftest import QUAKE_PLACE
-from .helpers import load_json
+from .helpers import clone, load_json
 
 JST = timezone(timedelta(hours=9))
 BASE = "20260926040000"
@@ -76,6 +76,34 @@ def test_wmo_mapping():
     assert wmo_condition(None, True) is None
     with pytest.raises(JmaParseError):
         parse_hourly({"error": True, "reason": "bad model"})
+
+
+@pytest.mark.parametrize(("code", "condition"), [
+    (45, "fog"), (48, "fog"),                                                   # fog, depositing rime fog
+    (71, "snowy"), (75, "snowy"), (77, "snowy"), (85, "snowy"), (86, "snowy"),  # snow fall, grains, showers
+    (4, None), (100, None),                                                     # not in the WMO table
+])
+def test_wmo_mapping_fog_snow_and_codes_outside_the_table(code, condition):
+    assert wmo_condition(code, True) == condition
+    assert wmo_condition(code, False) == condition
+
+
+def test_hourly_row_with_a_weather_code_outside_the_table_has_no_condition():
+    data = clone(load_json("openmeteo_msm.json"))
+    data["hourly"]["weather_code"][1] = 4  # hour 0 stays code 2
+    rows = parse_hourly(data)
+    assert len(rows) == 72
+    assert "condition" not in rows[1] and rows[1]["native_temperature"] == 18.5  # the other figures stay
+    assert rows[0]["condition"] == "partlycloudy"
+
+
+def test_hourly_rows_without_a_temperature_are_dropped():
+    """Beyond the model's horizon the feed answers null; those hours leave no row."""
+    data = clone(load_json("openmeteo_msm.json"))
+    data["hourly"]["temperature_2m"][-6:] = [None] * 6  # the last six hours of the 72
+    rows = parse_hourly(data)
+    assert len(rows) == 66
+    assert rows[-1]["datetime"] == "2026-09-28T17:00:00+09:00"
 
 
 class _Rec:

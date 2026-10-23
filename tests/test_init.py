@@ -1,23 +1,27 @@
-"""Integration layer: config flow, entities, events, last-good, health, simulate."""
+"""Integration layer: config flow, entities, events, last-good, health, simulate, alert-memory load."""
 
 from __future__ import annotations
 
 import dataclasses
 from datetime import timedelta
 
+import aiohttp
 import pytest
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
-from custom_components.jma.const import DOMAIN, JMA_ATTRIBUTION, URL_AMEDAS_TABLE, URL_WARNINGS
+from custom_components.jma.const import DOMAIN, JMA_ATTRIBUTION, URL_AMEDAS_TABLE, URL_AREA, URL_WARNINGS
+from custom_components.jma.memory import AlertMemory, empty_memory
 from custom_components.jma.parse_forecast import condition_for
 
 from .conftest import AREA, ENTRY_DATA, mock_jma, setup
 from .helpers import clone, load_json
+from .test_options_flow_http import FLOW, _client
 
 
 async def test_config_flow_picks_stations(tokyo: HomeAssistant, aioclient_mock) -> None:
@@ -58,6 +62,61 @@ async def test_config_flow_picks_two_different_stations_where_the_rules_differ(t
     assert "東京 44132 (1.9 km)" in result["description_placeholders"]["secondary"]
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["data"]["station_primary"] == "99999" and result["data"]["station_secondary"] == "44132"
+
+
+@pytest.mark.parametrize(("url", "fault"), [
+    (URL_AREA, {"status": 503}),                            # the agency's server is down
+    (URL_AREA, {"exc": aiohttp.ClientError("no route")}),   # this machine has no network
+    (URL_AREA, {"text": "<html>maintenance</html>"}),       # a maintenance page served with HTTP 200
+    (URL_AMEDAS_TABLE, {"status": 503}),                    # the station table is the second download
+])
+async def test_config_flow_aborts_when_a_download_fails(tokyo: HomeAssistant, aioclient_mock, url, fault) -> None:
+    """Any failure of the two downloads that open the flow ends it with `cannot_connect`; no entry is made."""
+    hass = tokyo
+    aioclient_mock.get(url, **fault)  # the first registration wins
+    mock_jma(aioclient_mock)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "cannot_connect"
+    assert hass.config_entries.async_entries(DOMAIN) == []
+
+
+async def test_config_flow_aborts_when_the_area_is_already_configured(
+        tokyo: HomeAssistant, aioclient_mock, entry) -> None:
+    """The area code is the entry's unique id: a second flow for the same area ends at the area step."""
+    hass = tokyo
+    mock_jma(aioclient_mock)
+    await setup(hass, entry)
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"office": "130000"})
+    assert result["step_id"] == "area"
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"area": AREA})
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_options_flow_recovers_in_the_same_flow_after_an_invalid_station_id(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_client) -> None:
+    """A refused id keeps the flow open on the form; valid ids sent to the same flow_id are cleaned (spaces
+    stripped, full-width digits folded to ASCII) and saved."""
+    client = await _client(tokyo, aioclient_mock, entry, hass_client)
+    flow = await (await client.post(FLOW, json={"handler": entry.entry_id})).json()
+    url = f"{FLOW}/{flow['flow_id']}"
+    refused = await client.post(url, json={"station_primary": "12", "station_secondary": "44132",
+                                           "debug_simulate": False})
+    assert refused.status == 200, await refused.text()
+    form = await refused.json()
+    assert form["type"] == "form" and form["flow_id"] == flow["flow_id"]
+    assert form["errors"] == {"station_primary": "invalid_station"}
+    assert dict(entry.options) == {}  # nothing was saved yet
+    saved = await client.post(url, json={"station_primary": " 62016 ",
+                                         "station_secondary": "４４１３２",  # full-width, as a Japanese IME types it
+                                         "debug_simulate": False})
+    assert saved.status == 200, await saved.text()
+    result = await saved.json()
+    assert result["type"] == "create_entry" and result["flow_id"] == flow["flow_id"]
+    await tokyo.async_block_till_done()
+    assert dict(entry.options) == {"station_primary": "62016", "station_secondary": "44132", "debug_simulate": False}
 
 
 async def test_the_weather_credit_has_the_link_open_meteo_asks_for(tokyo: HomeAssistant, aioclient_mock, entry) -> None:
@@ -297,3 +356,66 @@ async def test_feed_problem_after_thirty_minutes(tokyo: HomeAssistant, aioclient
     problem = hass.states.get("binary_sensor.jma_chiyoda_feed_problem")
     assert problem.state == "on"
     assert problem.attributes["warnings"]["problem"] is True
+
+
+# ---------- the alert memory file is read defensively; a bad file is never a failed setup ----------
+
+STORED_TSUNAMI = {"active": True, "home": "warning", "max": "major_warning", "id": "t-1",
+                  "issued": "2026-09-26T12:00:00+09:00"}
+
+
+def _memory_file(key: str, data: dict, version: int = 1) -> dict:
+    return {"version": version, "minor_version": 1, "key": key, "data": data}
+
+
+async def test_alert_memory_drops_a_typhoon_entry_that_is_not_an_object(hass: HomeAssistant, hass_storage) -> None:
+    key = "jma.abc.alert_memory"
+    hass_storage[key] = _memory_file(key, {"typhoon": {
+        "TC2631": "notice",                     # a string where the entry belongs
+        "TC2632": ["notice", 0],                # a list
+        "TC2633": {"stage": "urgent", "quiet": 2},
+    }})
+    memory = AlertMemory(hass, "abc")
+    await memory.async_load()
+    assert memory.typhoon == {"TC2633": {"stage": "urgent", "quiet": 2}}
+    assert memory.heat == [] and memory.tsunami == {}
+
+
+@pytest.mark.parametrize("tsunami", [
+    {**STORED_TSUNAMI, "active": "yes"},        # not a boolean
+    {**STORED_TSUNAMI, "home": "tidal-wave"},   # not a grade of the integration
+    {**STORED_TSUNAMI, "max": None},
+    {**STORED_TSUNAMI, "id": 7},                # not a string
+    {k: v for k, v in STORED_TSUNAMI.items() if k != "issued"},
+    ["warning"],                                # not an object at all
+])
+async def test_alert_memory_drops_a_tsunami_section_of_the_wrong_shape(
+        hass: HomeAssistant, hass_storage, tsunami) -> None:
+    key = "jma.abc.alert_memory"
+    hass_storage[key] = _memory_file(key, {"tsunami": tsunami})
+    memory = AlertMemory(hass, "abc")
+    await memory.async_load()
+    assert memory.tsunami == {}
+
+
+async def test_alert_memory_keeps_a_good_tsunami_section_and_only_its_five_keys(
+        hass: HomeAssistant, hass_storage) -> None:
+    key = "jma.abc.alert_memory"
+    hass_storage[key] = _memory_file(key, {"tsunami": {**STORED_TSUNAMI, "home_area": "extra"}})
+    memory = AlertMemory(hass, "abc")
+    await memory.async_load()
+    assert memory.tsunami == STORED_TSUNAMI
+
+
+async def test_alert_memory_written_by_a_newer_release_starts_empty_and_setup_goes_on(
+        tokyo: HomeAssistant, aioclient_mock, entry, hass_storage, caplog) -> None:
+    """A downgrade finds a file with a newer storage version: Home Assistant refuses to read it. The memory
+    starts empty (one alert may be repeated) and the entry still loads."""
+    hass = tokyo
+    mock_jma(aioclient_mock)
+    key = f"jma.{entry.entry_id}.alert_memory"
+    hass_storage[key] = _memory_file(key, {"heat": ["2026-09-26|alert|today"]}, version=2)
+    await setup(hass, entry)
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data.memory.data == empty_memory()
+    assert "alert memory could not be read; starting empty" in caplog.text

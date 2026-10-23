@@ -289,6 +289,27 @@ def test_wbgt_fallback_missing_and_empty():
     assert w.series[0]["wbgt"] is None and w.series[1]["wbgt"] == 21.0
 
 
+def test_wbgt_station_row_with_no_figure_in_any_slot_is_no_data():
+    header = load_text("wbgt_yohou_tokyo.csv").splitlines()[0]
+    slots = len(header.split(",")) - 2  # the header starts with two empty cells
+    blank = [""] * slots
+    today = date(2026, 9, 28)
+    assert parse_wbgt(f"{header}\n44132,2026/09/27 22:25,{','.join(blank)}\n", ("44132",), today) is None
+    one_figure = [*blank[:3], "210", *blank[4:]]  # only the fourth slot, 09:00 on the 28th
+    w = parse_wbgt(f"{header}\n44132,2026/09/27 22:25,{','.join(one_figure)}\n", ("44132",), today)
+    assert w is not None and len(w.series) == slots == 17
+    assert w.series[3] == {"time": "2026-09-28T09:00:00+09:00", "wbgt": 21.0}
+    assert w.today_max == 21.0 and sum(1 for point in w.series if point["wbgt"] is not None) == 1
+
+
+def test_wbgt_issue_time_in_another_format_is_left_out_but_the_figures_are_kept():
+    csv = load_text("wbgt_yohou_tokyo.csv").replace("44132,2026/09/27 22:25,", "44132,2026-09-27T22:25,")
+    assert "44132,2026-09-27T22:25," in csv  # the edit took
+    w = parse_wbgt(csv, ("44132",), date(2026, 9, 28))
+    assert w.station == "44132" and w.issued is None
+    assert len(w.series) == 17 and w.today_max == 22.0  # the same figures as the unedited file
+
+
 # ---------- map layers ----------
 
 def test_n3_thunder_and_tornado_frames():
