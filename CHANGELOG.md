@@ -3,6 +3,22 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- **Release asset.** Every published release carries `jma.zip`, the integration folder zipped by the new
+  `release.yml` workflow. `hacs.json` names it (`zip_release`, `filename`), so HACS and the Home Assistant
+  Marketplace fetch one file instead of every file of the folder, and count the downloads. The asset was added to
+  the 0.6.0 to 0.7.0 releases by hand, so those versions stay installable.
+- **Marketplace categories.** `manifest.json` lists `weather_alerts.forecasts` and `weather_alerts.public_warnings`,
+  the categories the Marketplace and the HACS action read (the action warned about their absence).
+
+### Changed
+
+- **Only releases are offered.** `hide_default_branch` in `hacs.json` removes the `main` branch from the version
+  picker, so users only install a tested release.
+
 ## 0.7.0 - quality scale
 
 Work towards the Home Assistant Integration Quality Scale.

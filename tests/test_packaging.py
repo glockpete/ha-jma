@@ -71,10 +71,31 @@ def test_user_agent_names_the_product_and_version_only():
     assert USER_AGENT == f"ha-jma/{VERSION}"
 
 
-def test_hacs_json_holds_name_country_and_minimum_version_only():
+def test_hacs_json_holds_name_country_minimum_version_and_the_release_asset():
     hacs = _load(ROOT / "hacs.json")
-    assert set(hacs) == {"name", "country", "homeassistant"}
+    assert set(hacs) == {"name", "country", "homeassistant", "zip_release", "filename", "hide_default_branch"}
     assert hacs["country"] == "JP"  # HACS asks for it when a repository serves one country
+    # HACS and the Marketplace download the release asset named here and count its downloads; the default
+    # branch is not offered, so users only ever get a tested release
+    assert hacs["zip_release"] is True
+    assert hacs["filename"] == "jma.zip"
+    assert hacs["hide_default_branch"] is True
+
+
+def test_the_release_workflow_attaches_the_asset_hacs_json_names():
+    workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    hacs = _load(ROOT / "hacs.json")
+    assert workflow.count(hacs["filename"]) >= 2  # zipped, then uploaded
+    assert "types: [published]" in workflow  # every published release gets its asset
+
+
+def test_manifest_categories_place_the_integration_in_the_marketplace():
+    categories = _load(COMPONENT / "manifest.json")["categories"]
+    # one to three known category ids, the first one primary (hassfest and the HACS action check the shape)
+    assert 1 <= len(categories) <= 3 and len(set(categories)) == len(categories)
+    assert all(re.fullmatch(r"[a-z0-9_]+(\.[a-z0-9_]+)?", c) for c in categories)
+    assert categories[0] == "weather_alerts.forecasts"
+    assert "weather_alerts.public_warnings" in categories  # storms, floods and earthquakes
 
 
 def test_the_name_says_it_is_unofficial_in_every_place_a_user_sees_it():

@@ -1,6 +1,10 @@
 {
   "domain": "jma",
   "name": "JMA Weather (Unofficial)",
+  "categories": [
+    "weather_alerts.forecasts",
+    "weather_alerts.public_warnings"
+  ],
   "codeowners": [
     "@glockpete"
   ],

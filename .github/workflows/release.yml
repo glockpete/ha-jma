@@ -1,0 +1,52 @@
+name: Release
+
+# Attaches jma.zip, the integration folder zipped, to every published release. hacs.json names that asset
+# (zip_release + filename), so HACS and the Home Assistant Marketplace download one file instead of every file
+# of the folder, and count its downloads. Borrowed from HACS's own .github/workflows/publish.yml.
+# Run it by hand (workflow_dispatch, with the tag) to add the asset to an older release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag of an existing release to attach the asset to, for example v0.7.0"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  asset:
+    name: Attach jma.zip to the release
+    runs-on: "ubuntu-latest"
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"  # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+      # HACS and the Marketplace compare the two, so a release whose manifest says another version gets no asset
+      - name: The manifest version must equal the tag
+        run: |
+          version="$(jq -r .version custom_components/jma/manifest.json)"
+          if [ "v$version" != "$TAG" ]; then
+            echo "manifest.json says $version but the tag is $TAG" >&2
+            exit 1
+          fi
+      # manifest.json sits at the root of the archive: the Marketplace extracts it into custom_components/jma
+      - name: Zip the integration folder
+        run: |
+          cd custom_components/jma
+          zip -r ../../jma.zip . -x '*/__pycache__/*' '*.pyc'
+          unzip -l ../../jma.zip
+      - name: Upload the asset to the release
+        uses: "softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64"  # v3.0.3
+        with:
+          tag_name: ${{ github.event.release.tag_name || inputs.tag }}
+          files: jma.zip

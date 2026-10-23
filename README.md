@@ -122,8 +122,9 @@ The integration needs no extra Python packages.
 
 ### Install by hand
 
-1. Copy the folder `custom_components/jma` of this repository into the `custom_components` folder of your Home
-   Assistant configuration.
+1. Download `jma.zip` from the [latest release](https://github.com/glockpete/ha-jma/releases/latest) and unzip it
+   into a folder named `custom_components/jma` in your Home Assistant configuration. Or copy the folder
+   `custom_components/jma` of this repository there.
 2. Restart Home Assistant.
 3. Continue with [Set up](#set-up).
 

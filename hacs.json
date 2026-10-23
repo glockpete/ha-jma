@@ -1,5 +1,8 @@
 {
   "name": "JMA Weather (Unofficial)",
   "country": "JP",
-  "homeassistant": "2026.9.0"
+  "homeassistant": "2026.9.0",
+  "zip_release": true,
+  "filename": "jma.zip",
+  "hide_default_branch": true
 }
