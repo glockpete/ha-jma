@@ -11,8 +11,6 @@ and the project uses [semantic versioning](https://semver.org/).
   `release.yml` workflow. `hacs.json` names it (`zip_release`, `filename`), so HACS and the Home Assistant
   Marketplace fetch one file instead of every file of the folder, and count the downloads. The asset was added to
   the 0.6.0 to 0.7.0 releases by hand, so those versions stay installable.
-- **Marketplace categories.** `manifest.json` lists `weather_alerts.forecasts` and `weather_alerts.public_warnings`,
-  the categories the Marketplace and the HACS action read (the action warned about their absence).
 
 ### Changed
 
