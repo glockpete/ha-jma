@@ -9,7 +9,7 @@ rules:
   common-modules: done  # coordinator.py (DataUpdateCoordinator subclasses), entity.py (JmaEntity base)
   config-flow: done  # config_flow.py: office -> municipality -> confirm, with data_description on every field
   config-flow-test-coverage: done  # tests/test_init.py, test_hardening_lifecycle.py, test_options_flow_http.py, test_station_id_validation.py, test_reconfigure_flow.py, test_device_title.py
-  dependency-transparency: done  # manifest requirements: [] (aiohttp and voluptuous come with Home Assistant)
+  dependency-transparency: done  # manifest requirements: [] (aiohttp and probatio come with Home Assistant)
   docs-actions: done  # README "Test your automations" (jma.simulate)
   docs-conditions:
     status: exempt

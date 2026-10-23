@@ -64,6 +64,9 @@ Work towards the Home Assistant Integration Quality Scale.
   the temperature ranges as extra keys). Three spellings became explicit: a merge with no primary observation returns
   the secondary one, a warning with no data type is not looked up in the headlines, and a map-tile pixel of an
   impossible shape raises a parse error instead of a `TypeError`.
+- **Schemas import `probatio`**, Home Assistant's validation engine since 2026.9 (`voluptuous` is an alias of it at
+  run time and is no longer installed). Importing it directly lets mypy check the schemas against Home Assistant
+  2026.10's signatures; the behaviour is the same.
 - The success text of Reconfigure no longer says that the entry is reloading ("The stations and names were
   updated."), because it reloads only when it is set up and a setting changed.
 - The README describes the set-up dialogs with their texts, Options, Reconfigure, the move of the home, the device

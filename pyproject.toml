@@ -37,9 +37,17 @@ ignore = ["E501"]
 known-first-party = ["custom_components"]
 
 [tool.mypy]
+# Checked against the Home Assistant that requirements_test.txt installs (2026.10.2): its signatures take probatio
+# schemas, while 2026.9 still typed them as voluptuous, so mypy is green on 2026.10 only. The code runs on both.
 python_version = "3.13"
 strict = true
 warn_unreachable = true
 files = ["custom_components/jma"]
 plugins = []
-# No [[tool.mypy.overrides]]: every third-party import (homeassistant, aiohttp, PIL, voluptuous) ships its own types.
+# Every third-party import (homeassistant, aiohttp, PIL, probatio) ships its own types. The one override: Home
+# Assistant 2026.10.2's binary_sensor package imports BinarySensorDeviceClass from its const module without an
+# __all__ (dev has one since October 2026), and strict mode would refuse the re-export; 2026.9 defines it in place.
+
+[[tool.mypy.overrides]]
+module = "homeassistant.components.binary_sensor"
+implicit_reexport = true

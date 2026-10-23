@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
-import voluptuous as vol
+import probatio as vol
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, Platform
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
