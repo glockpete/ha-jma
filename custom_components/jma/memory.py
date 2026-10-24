@@ -1,10 +1,11 @@
 """What Home Assistant has already announced about long-lived hazards, kept across restarts.
 
-A typhoon stage, a heat alert for a date and a tsunami bulletin stay true for hours or days;
-without this a restart would send each of them again. Quakes, EEW and JMA warnings are NOT kept
+A typhoon stage, a heat alert for a date, a tsunami bulletin and a volcano's level stay true for hours or days;
+without this a restart would send each of them again (and a level that changed while Home Assistant was down would
+never be announced). Quakes, EEW and JMA warnings are NOT kept
 here on purpose: those are announced again after a restart.
 
-The trackers (parse_tsunami, parse_typhoon, parse_heat_alert) are pure: they read and change the
+The trackers (parse_tsunami, parse_typhoon, parse_heat_alert, parse_volcano) are pure: they read and change the
 plain dict / list of their own section and the owner calls save().
 
 "Announced" must mean "handed to Home Assistant", not "decided": alerts
@@ -37,10 +38,11 @@ class MemoryData(TypedDict):
     typhoon: dict[str, Any]
     heat: list[str]
     tsunami: dict[str, Any]
+    volcano: dict[str, Any]
 
 
 def empty_memory() -> MemoryData:
-    return {"typhoon": {}, "heat": [], "tsunami": {}}
+    return {"typhoon": {}, "heat": [], "tsunami": {}, "volcano": {}}
 
 
 def _clean_typhoon(value: Any) -> dict[str, Any]:
@@ -78,6 +80,27 @@ def _clean_tsunami(value: Any) -> dict[str, Any]:
     return {k: value[k] for k in ("active", "home", "max", "id", "issued")}
 
 
+def _clean_volcano(value: Any) -> dict[str, Any]:
+    """{volcano code: {"level": int 0-5, "kind_code", "name_ja", "name_en", "report_time", "absent": int}}; an entry
+    of another shape is dropped (one repeated or one missed event is the worst case of that, a poll that raises
+    forever the worst case of keeping it). Only scalars are kept, and `level` and `absent` are whole numbers."""
+    out: dict[str, Any] = {}
+    if not isinstance(value, dict):
+        return out
+    for code, entry in value.items():
+        if not isinstance(code, str) or not isinstance(entry, dict):
+            continue
+        level = entry.get("level")
+        if not isinstance(level, int) or isinstance(level, bool) or not 0 <= level <= 5:
+            continue
+        kept = {k: v for k, v in entry.items() if isinstance(k, str) and isinstance(v, _SCALARS)}
+        absent = entry.get("absent")
+        kept["level"] = level
+        kept["absent"] = absent if isinstance(absent, int) and not isinstance(absent, bool) and absent >= 0 else 0
+        out[code] = kept
+    return out
+
+
 class AlertMemory:
     """One small JSON file per config entry (.storage/jma.<entry_id>.alert_memory)."""
 
@@ -102,6 +125,10 @@ class AlertMemory:
     def tsunami(self) -> dict[str, Any]:
         return self.data["tsunami"]
 
+    @property
+    def volcano(self) -> dict[str, Any]:
+        return self.data["volcano"]
+
     async def async_load(self) -> None:
         """A missing or damaged file is an empty memory: the worst case is one repeated alert.
         Entries of the wrong shape are dropped one by one, never raised later inside a poll."""
@@ -116,6 +143,7 @@ class AlertMemory:
             "typhoon": _clean_typhoon(sections.get("typhoon")),
             "heat": _clean_heat(sections.get("heat")),
             "tsunami": _clean_tsunami(sections.get("tsunami")),
+            "volcano": _clean_volcano(sections.get("volcano")),
         }
 
     @callback

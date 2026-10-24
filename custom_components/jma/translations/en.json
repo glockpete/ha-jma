@@ -44,11 +44,13 @@
         "data": {
           "station_primary": "Primary AMeDAS station id",
           "station_secondary": "Secondary AMeDAS station id (type A)",
+          "volcano_radius_km": "Volcano distance (km)",
           "debug_simulate": "Enable the jma.simulate test action"
         },
         "data_description": {
           "station_primary": "The nearest AMeDAS station that measures temperature; its readings come first.",
           "station_secondary": "The nearest type A station, used for pressure and for any value the primary station does not report.",
+          "volcano_radius_km": "A volcano bulletin that names no municipality counts for the volcano sensor when the volcano is within this distance of Home Assistant's home. A bulletin that names municipalities counts when yours is one of them, whatever the distance. 0 turns the distance rule off.",
           "debug_simulate": "Lets the jma.simulate action fire test alerts at this entry; leave it off in normal use."
         }
       }
@@ -109,6 +111,9 @@
           "alert": "Alert",
           "special": "Special alert"
         }
+      },
+      "volcano": {
+        "name": "Volcano"
       }
     },
     "binary_sensor": {
@@ -135,7 +140,9 @@
               "tsunami_cancelled": "Tsunami warnings cancelled",
               "typhoon_approach": "Typhoon approaching",
               "typhoon_cleared": "Typhoon passed",
-              "heat_alert": "Heat stroke alert"
+              "heat_alert": "Heat stroke alert",
+              "volcano_raised": "Volcano level raised",
+              "volcano_lowered": "Volcano level lowered"
             }
           }
         }

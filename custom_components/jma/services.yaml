@@ -19,6 +19,8 @@ simulate:
             - typhoon_approach
             - typhoon_cleared
             - heat_alert
+            - volcano_raised
+            - volcano_lowered
     data:
       required: false
       selector:

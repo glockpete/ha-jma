@@ -45,6 +45,7 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
   - [When JMA cannot be reached](#when-jma-cannot-be-reached)
 - [Use it in automations](#use-it-in-automations)
 - [Entities](#entities)
+  - [Volcanoes](#volcanoes)
   - [Disabled and diagnostic entities](#disabled-and-diagnostic-entities)
 - [Events](#events)
 - [Earthquake values](#earthquake-values)
@@ -100,6 +101,8 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
 - **Heat stroke.** The Ministry of the Environment's heat-stroke alerts (熱中症警戒アラート, heat-stroke alert, and
   熱中症特別警戒アラート, special heat-stroke alert), and the forecast heat index (WBGT,
   wet-bulb globe temperature) where it is available.
+- **Volcanoes.** The highest 噴火警戒レベル (volcanic alert level) among the volcanoes that concern your place, as a
+  sensor with the volcanoes listed, and an event when one of those levels changes.
 - **Health.** A feed-problem sensor, repair issues for a missing earthquake connection or a silent weather station,
   and a diagnostics download that hides your location.
 - Interface text in English and Japanese.
@@ -225,6 +228,7 @@ is titled **JMA options**. Each field starts with the value the entry uses now.
 |---|---|
 | Primary AMeDAS station id | The nearest AMeDAS station that measures temperature; its readings come first. |
 | Secondary AMeDAS station id (type A) | The nearest type A station, used for pressure and for any value the primary station does not report. |
+| Volcano distance (km) | A volcano bulletin that names no municipality counts for the volcano sensor when the volcano is within this distance of Home Assistant's home. A bulletin that names municipalities counts when yours is one of them, whatever the distance. 0 turns the distance rule off. See [Volcanoes](#volcanoes). |
 | Enable the jma.simulate test action | Lets the jma.simulate action fire test alerts at this entry; leave it off in normal use. See [Test your automations](#test-your-automations). |
 
 What happens when you submit:
@@ -245,6 +249,9 @@ five-digit check. JMA being down does not stop you from saving. A wrong id saved
 silent station (see [Repair issues](#repair-issues)).
 
 A station id saved here replaces the station picked at set-up. [Reconfigure](#reconfigure) removes it again.
+
+The volcano distance is a whole number of kilometres from 0 to 500. A form submitted without it uses the default of
+50 km. [Reconfigure](#reconfigure) keeps it.
 
 ### Reconfigure
 
@@ -436,6 +443,47 @@ is installed. In the entity ids below, `<place>` is the lower-case English name 
 | `sensor.jma_<place>_heat_alert` | Today's heat-stroke alert for the prefecture: `none`, `alert` (熱中症警戒アラート) or `special` (熱中症特別警戒アラート). The attributes show what is issued for tomorrow and the forecast WBGT figures of the prefecture's stations. Unavailable out of season. |
 | `sensor.jma_<place>_wbgt` | Today's highest forecast heat index (WBGT), in °C. Only created for the Tokyo office (see [Known limits](#known-limits)). Unavailable out of season. |
 
+### Volcanoes
+
+| Entity | What it shows |
+|---|---|
+| `sensor.jma_<place>_volcano` | The highest 噴火警戒レベル (volcanic alert level), 1 to 5, among the volcanoes that concern your place, or 0 when none does. For a volcano that has no levels, the sensor shows JMA's warning grade on the same scale (table below). The attributes list the volcanoes. |
+
+**Which volcanoes concern your place.** The sensor reads JMA's list of current volcano bulletins
+(噴火警報・予報, `warning.json`) and decides for each volcano from the bulletin itself:
+
+1. If the bulletin lists municipalities (JMA's affected-area list), the volcano concerns you when your municipality is
+   one of them. The distance is not used.
+2. If the bulletin lists none, the volcano concerns you when it lies within the distance set under
+   [Options](#options) of Home Assistant's home. The default is 50 km. This default is this integration's choice,
+   not a JMA figure. The value 0 turns the distance rule off. A volcano with no coordinates in JMA's volcano list
+   cannot be placed and does not count.
+
+**What the number is.** For the volcanoes that have JMA's 噴火警戒レベル (levels 1 to 5) the number is the level. Some
+volcanoes have no levels. JMA gives them a grade, and JMA publishes no scale for these. The sensor puts them on the
+0 to 5 scale as this table says. The exact grade is always in the attributes (`kind_code`, `warning_type`,
+`level_system`).
+
+| JMA kind code | JMA's wording | Number on the sensor |
+|---|---|---|
+| 11 to 15 | Level 1 to Level 5 (`level_system` is `true`) | 1 to 5 |
+| 21, 35 | Potential for increased activity (活火山であることに留意) | 1 |
+| 22 | Caution advised around the crater (火口周辺危険) | 2 |
+| 23 | Caution advised in non-residential areas near the crater (入山危険) | 3 |
+| 25 | Extreme caution advised in residential areas (居住地域厳重警戒) | 4 |
+| 36 | Caution advised for the sea area near the volcano (周辺海域警戒) | 2 |
+
+A kind code that is not in this table is listed in the attribute with `level` set to `null` and its code in
+`unknown_codes`. It is not counted and sends no event. The integration writes one warning to the log for each new code.
+
+| Attribute | What it holds |
+|---|---|
+| `count` | The number of volcanoes that concern your place. The state is the highest level of all of them. |
+| `volcanoes` | The volcanoes, highest level first, then the nearest, at most 10 (`max_listed`). Each has `code`, `name_ja`, `name_en`, `level`, `level_system`, `warning_type` (`forecast`, `crater`, `residential` or `sea`), `kind_code`, `kind_ja`, `kind_en`, `condition` (JMA's 引上げ or 引下げ), `headline` (JMA's text for the bulletin, at most 300 characters), `report_time`, `relevance` (`municipality` or `distance`), `distance_km` and `jma_url` (the volcano's page on JMA's site). The list is excluded from the recorder. |
+| `report_time` | The newest report time among the listed volcanoes. |
+| `radius_km` | The distance rule in use. |
+| `max_listed`, `unknown_codes` | The limit of the list, and the kind codes this release does not know. |
+
 ### Earthquakes and tsunami
 
 | Entity | What it shows |
@@ -517,10 +565,25 @@ Typhoon approach stages:
 | `notice` | Within 72 hours, the forecast track passes within 300 km of your home, or your home enters the storm-warning zone (暴風警戒域). |
 | `urgent` | Within 24 hours, your home enters the storm-warning zone, or it is already inside. |
 
+### Volcano levels
+
+| Event type | When it fires | Data |
+|---|---|---|
+| `volcano_raised` | The level of a volcano that concerns your place (see [Volcanoes](#volcanoes)) goes up. This includes a volcano seen for the first time at level 2 or higher: `old_level` is then 0. | `volcano_code`, `name_ja`, `name_en`, `old_level`, `new_level`, `kind_code`, `kind_ja`, `kind_en`, `warning_type`, `level_system`, `condition`, `headline`, `report_time`, `distance_km`, `jma_url`, `area` |
+| `volcano_lowered` | The level of such a volcano goes down. When JMA no longer lists the volcano, `new_level` is 0 and the bulletin fields are `null`. | as above |
+
+Level 0 and level 1 count as one state for these events. JMA keeps a volcano at level 1 for a while after it lowers
+the level and then drops it from the list, which is not a change of activity, so neither step sends an event. A
+volcano that is missing from the list is announced as lowered to 0 only after two polls in a row without it, so one
+incomplete file from JMA's server does not send a "lowered" followed by a "raised". A bulletin that is older than the
+one the integration remembers is ignored. For a volcano that has no levels, the `old_level` and `new_level` are the
+numbers of the [table](#volcanoes), and `kind_code` says which grade it was.
+
 ### After a restart
 
-Typhoon stages, heat alerts and tsunami information are remembered across restarts, so a restart does not
-announce them again. Earthquakes, early warnings and warnings are not remembered, on purpose: they are announced
+Typhoon stages, heat alerts, tsunami information and volcano levels are remembered across restarts, so a restart
+does not announce them again. A volcano whose level changed while Home Assistant was down is announced once after the
+restart. Earthquakes, early warnings and warnings are not remembered, on purpose: they are announced
 again after a restart.
 
 ## Earthquake values
@@ -585,6 +648,8 @@ The sensor also has `connected`: whether the connection to P2P地震情報 is op
 | AMeDAS observations (JMA) | 10 minutes | `INTERVAL_AMEDAS` |
 | Warning outlook (JMA) | 10 minutes | `INTERVAL_TIMELINE` |
 | Heat-stroke alert (Ministry of the Environment; new files at 05, 10, 14 and 17 JST in season) | 20 minutes | `INTERVAL_HEAT_ALERT` |
+| Volcano warnings (JMA, `warning.json`; a volcano's own bulletin text is read when its report time changes) | 5 minutes | `INTERVAL_VOLCANO` |
+| Volcano list (JMA: names and coordinates) | 24 hours | `INTERVAL_VOLCANO_LIST` |
 | Typhoons (JMA) | 30 minutes | `INTERVAL_TYPHOON` |
 | Nationwide city forecast (JMA) | 30 minutes | `INTERVAL_JAPAN` |
 | Hourly forecast (Open-Meteo) | 60 minutes | `INTERVAL_HOURLY` |
@@ -613,6 +678,7 @@ when any feed is a problem.
 | `hourly` | The hourly forecast was not fetched for 3 hours. | `HEALTH_HOURLY_MAX_AGE` |
 | `nowcast` | No nowcast frame is newer than 20 minutes. | `HEALTH_NOWCAST_MAX_AGE` |
 | `forecast` | No forecast was issued in the last 13 hours. JMA issues at 05, 11 and 17 JST, so the night gap is 12 hours. | `HEALTH_FORECAST_MAX_AGE` |
+| `volcano` | The volcano warnings file was not fetched for 15 minutes. | `HEALTH_VOLCANO_MAX_AGE` |
 | `quake` | The P2P地震情報 connection has been down for more than 10 minutes. Only for an entry that holds a connection. | `HEALTH_QUAKE_MAX_DOWN` |
 
 The constants are in `const.py` unless the table says otherwise.
@@ -664,6 +730,13 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
 
 - Weather, forecasts, warnings, rain and typhoons work for every municipality (class20 area) in JMA's list.
 - River-flood warnings are not read. JMA keeps them in a separate map.
+- **Volcanoes.** The sensor reads the bulletins JMA lists in `warning.json` (噴火警報・予報). It does not read the
+  volcanic observation reports, ash-fall forecasts or the map of regulated areas. A volcano counts by the municipalities
+  its bulletin names, or by distance when it names none. A bulletin that lists areas is
+  judged by them alone, even when none of them can match a municipality (JMA's list for 西之島 holds one code,
+  1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
+  For a volcano without levels, the 0 to 5 number is this integration's placement of JMA's grade, not
+  a JMA figure (see [Volcanoes](#volcanoes)). The 50 km default distance is this integration's choice too.
 - **The tsunami coast area (津波予報区) is known only for Tokyo prefecture**, by municipality: 東京湾内湾 (inner
   Tokyo Bay: the 23 wards and the mainland), 伊豆諸島 (the Izu islands) and 小笠原諸島 (the Ogasawara islands).
   Everywhere else `sensor.jma_<place>_tsunami` stays `none`. Its `max_grade` attribute and the `tsunami` event
@@ -717,7 +790,7 @@ Where a service states no rate limit, none is given here. The intervals in
 
 | Service | Used for | Licence |
 |---|---|---|
-| [Japan Meteorological Agency](#japan-meteorological-agency) | forecasts, warnings, AMeDAS, nowcast and risk tiles, typhoons | Public Data License 1.0, unless a page says otherwise |
+| [Japan Meteorological Agency](#japan-meteorological-agency) | forecasts, warnings, AMeDAS, nowcast and risk tiles, typhoons, volcano warnings | Public Data License 1.0, unless a page says otherwise |
 | [Open-Meteo](#open-meteo) | hourly forecast (JMA MSM model) | CC BY 4.0; free API for non-commercial use only |
 | [P2P地震情報](#p2p地震情報) | earthquake information, early warnings, tsunami information | free for commercial and non-commercial use; no warranty |
 | [Ministry of the Environment](#ministry-of-the-environment) | heat index (WBGT) and heat-stroke alerts | the ministry's terms |
@@ -800,6 +873,8 @@ Where a service states no rate limit, none is given here. The intervals in
   receives that location with each request.
 - Requests to JMA carry the map tile numbers of your home location (for the rain nowcast and the map layers) and
   the ids of the two weather stations (for the AMeDAS files).
+- Volcano warnings are read for the whole of Japan. Your home location is compared with the volcanoes inside Home
+  Assistant and is not sent. The requests name volcano codes only.
 - The diagnostics file hides the place: coordinates, area code and names, station ids and the entry title.
 
 ## Troubleshooting
@@ -850,7 +925,7 @@ Where a service states no rate limit, none is given here. The intervals in
   | `P2P earthquake connection lost: <reason>; reconnecting` | WARNING | The earthquake connection was open and dropped. The integration reconnects by itself. |
   | `P2P earthquake connection cannot be opened: <reason>; retrying` | WARNING | A connection could not be opened, for example at start, when P2P地震情報 refuses it or cannot be reached. The integration tries again by itself. |
   | `P2P earthquake connection is back` | INFO | The connection has been open for 60 seconds. This ends the outage; a connection that dropped sooner was part of it. |
-  | `jma <feed>: unexpected payload: <error>` | WARNING | A file arrived but did not have the shape the integration reads. The entities keep the last good data (see [Update intervals](#update-intervals)). `<feed>` is `forecast`, `hourly`, `amedas`, `warnings`, `nowcast`, `warning outlook`, `typhoon`, `wbgt`, `heat alert`, `japan` or `layers`. |
+  | `jma <feed>: unexpected payload: <error>` | WARNING | A file arrived but did not have the shape the integration reads. The entities keep the last good data (see [Update intervals](#update-intervals)). `<feed>` is `forecast`, `hourly`, `amedas`, `warnings`, `nowcast`, `warning outlook`, `typhoon`, `wbgt`, `heat alert`, `volcano`, `japan` or `layers`. |
   | `jma <feed>: data is back after N failed poll(s)` | INFO | The feed works again after an "unexpected payload" run of N failed polls. |
 
   When a feed fails and has no good data left to keep (see [Update intervals](#update-intervals)), Home Assistant
@@ -866,8 +941,8 @@ Where a service states no rate limit, none is given here. The intervals in
 What is deleted with an entry:
 
 - The entry, its device, its entities and its [repair issues](#repair-issues). Home Assistant does this.
-- The file where the integration remembers what it has announced (typhoon stages, heat alerts and tsunami
-  information, see [After a restart](#after-a-restart)). It is `jma.<entry id>.alert_memory` in the `.storage` folder
+- The file where the integration remembers what it has announced (typhoon stages, heat alerts, tsunami
+  information and volcano levels, see [After a restart](#after-a-restart)). It is `jma.<entry id>.alert_memory` in the `.storage` folder
   of your Home Assistant configuration. It is the only file the integration writes.
 - The earthquake connection of the entry. If another JMA entry has none, it reloads by itself and takes it.
 

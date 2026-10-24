@@ -19,6 +19,9 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -33,11 +36,14 @@ from .const import (
     CONF_OFFICE,
     CONF_STATION_PRIMARY,
     CONF_STATION_SECONDARY,
+    CONF_VOLCANO_RADIUS_KM,
     DOMAIN,
     URL_AMEDAS_TABLE,
     URL_AREA,
+    VOLCANO_RADIUS_MAX_KM,
 )
 from .errors import JmaError, JmaParseError
+from .parse_volcano import radius_km
 
 _LOGGER = logging.getLogger(__name__)
 # What a file of the wrong shape raises on its way through the code that reads it: JSON that is valid but not what
@@ -300,6 +306,9 @@ class JmaOptionsFlow(OptionsFlow):
                 for key in (CONF_STATION_PRIMARY, CONF_STATION_SECONDARY):
                     if cleaned[key] not in table:
                         errors[key] = "unknown_station"
+            if CONF_VOLCANO_RADIUS_KM in cleaned:
+                # The number box answers a float (80.0); a field left empty is not sent and the default applies.
+                cleaned[CONF_VOLCANO_RADIUS_KM] = int(radius_km(cleaned[CONF_VOLCANO_RADIUS_KM]))
             if not errors:
                 return self.async_create_entry(data=cleaned)
             data = {**data, **cleaned}
@@ -309,5 +318,12 @@ class JmaOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="init", errors=errors, data_schema=vol.Schema({
             vol.Required(CONF_STATION_PRIMARY, default=str(data[CONF_STATION_PRIMARY])): str,
             vol.Required(CONF_STATION_SECONDARY, default=str(data[CONF_STATION_SECONDARY])): str,
+            # Optional with a suggested value, not a default: an options form that does not send it (a client that
+            # predates it) leaves the saved options as they were, and the default radius applies until one is set.
+            vol.Optional(CONF_VOLCANO_RADIUS_KM, description={
+                "suggested_value": int(radius_km(data.get(CONF_VOLCANO_RADIUS_KM)))}):
+                NumberSelector(NumberSelectorConfig(
+                    min=0, max=VOLCANO_RADIUS_MAX_KM, step=1, unit_of_measurement="km",
+                    mode=NumberSelectorMode.BOX)),
             vol.Required(CONF_DEBUG_SIMULATE, default=bool(data.get(CONF_DEBUG_SIMULATE, False))): bool,
         }))

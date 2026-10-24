@@ -20,6 +20,7 @@ from .const import (
     HEALTH_HOURLY_MAX_AGE,
     HEALTH_NOWCAST_MAX_AGE,
     HEALTH_QUAKE_MAX_DOWN,
+    HEALTH_VOLCANO_MAX_AGE,
 )
 from .coordinator import JmaConfigEntry, JmaRuntime
 from .entity import JmaEntity
@@ -116,6 +117,14 @@ def feed_conditions(rt: JmaRuntime, now: datetime) -> dict[str, str | None]:
         out["quake"] = f"P2P socket down since {q.down_since.isoformat()}"
     else:
         out["quake"] = None
+
+    # The volcano list is a safety feed (an eruption warning can come at any hour): a silent feed would read as level 0.
+    v = rt.volcano
+    volcano_since = v.last_ok or v.first_try
+    if volcano_since is not None and now - volcano_since > HEALTH_VOLCANO_MAX_AGE:
+        out["volcano"] = f"volcano warnings not fetched since {v.last_ok}: {clip_error(v.last_error)}"
+    else:
+        out["volcano"] = None
     return out
 
 

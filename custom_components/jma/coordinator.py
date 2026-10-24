@@ -10,6 +10,7 @@ import asyncio
 import csv
 import json
 import logging
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -35,6 +36,8 @@ from .const import (
     INTERVAL_NOWCAST,
     INTERVAL_TIMELINE,
     INTERVAL_TYPHOON,
+    INTERVAL_VOLCANO,
+    INTERVAL_VOLCANO_LIST,
     INTERVAL_WARNINGS,
     INTERVAL_WBGT,
     INTERVAL_XML,
@@ -65,10 +68,16 @@ from .const import (
     URL_TYPHOON_FORECAST,
     URL_TYPHOON_SPECS,
     URL_TYPHOON_TARGET,
+    URL_VOLCANO_LIST,
+    URL_VOLCANO_WARNING,
+    URL_VOLCANO_WARNINGS,
     URL_WARNING_TIMELINE,
     URL_WARNINGS,
     URL_WBGT,
     URL_XML_EXTRA,
+    VOLCANO_KINDS,
+    VOLCANO_MAX_LISTED,
+    VOLCANO_RADIUS_DEFAULT_KM,
     WARNINGS_SUSPECT_MAX_POLLS,
     WBGT_PREF,
 )
@@ -119,6 +128,17 @@ from .parse_nowcast import (
 )
 from .parse_timeline import WarningOutlook, parse_timeline
 from .parse_typhoon import ApproachTracker, approach_stage, fit_storms, parse_storm, parse_target_tc
+from .parse_volcano import (
+    VolcanoInfo,
+    VolcanoTracker,
+    VolcanoWarning,
+    newest_report,
+    parse_headline,
+    parse_volcano_list,
+    parse_volcano_warnings,
+    relevance,
+    volcano_entry,
+)
 from .parse_warnings import (
     AreaWarnings,
     WarningChange,
@@ -174,6 +194,8 @@ class JmaConfig:
     station_secondary: str
     latitude: float
     longitude: float
+    # How far (km) a volcano may be from the home for a bulletin that names no municipality to count (0 = never).
+    volcano_radius_km: float = float(VOLCANO_RADIUS_DEFAULT_KM)
 
 
 class _JmaCoordinator(DataUpdateCoordinator[T], Generic[T]):
@@ -744,6 +766,105 @@ class HeatAlertCoordinator(AlertEmitter, _JmaCoordinator[HeatAlertState]):
                             label, self.cfg.office, file_status(text))
 
 
+@dataclass(frozen=True)
+class VolcanoState:
+    """level: the highest level on the 1-5 scale among the volcanoes that concern the place (0: none is in
+    warning.json). count: how many volcanoes concern the place. volcanoes: at most VOLCANO_MAX_LISTED of them,
+    highest first."""
+
+    level: int
+    count: int
+    volcanoes: list[dict[str, Any]]
+    unknown_codes: list[str]
+    report_time: str | None  # the newest report time among the volcanoes that concern the place
+
+
+class VolcanoCoordinator(AlertEmitter, _JmaCoordinator[VolcanoState]):
+    """噴火警報・予報: the volcanoes with a bulletin in force that concern the place.
+
+    warning.json is the only file read every poll. The headline of a volcano comes from its own bulletin
+    (warning/{code}.json), asked for once per report time; the names and coordinates come from volcano_list.json, asked
+    for once a day and kept when a request fails. No volcano in the list is a good poll (level 0).
+    volcano_raised / volcano_lowered events; `memory` is the "volcano" section of AlertMemory (see
+    parse_volcano.VolcanoTracker), `save` persists it.
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig,
+                 fire: FireCallback | None = None,
+                 memory: dict[str, Any] | None = None, save: Callable[[], None] | None = None) -> None:
+        super().__init__(hass, entry, api, cfg, "volcano", INTERVAL_VOLCANO)
+        self._init_emitter(fire or (lambda _type, _data: None))
+        self._memory: dict[str, Any] = memory if memory is not None else {}
+        self._save: Callable[[], None] = save or (lambda: None)
+        self._tracker = VolcanoTracker(self._memory)
+        self._volcanoes: dict[str, VolcanoInfo] = {}
+        self._volcanoes_at: datetime | None = None
+        self._headlines: dict[str, tuple[str, str | None]] = {}  # code -> (report time it was read for, headline)
+        self._warned_kinds: set[str] = set()
+
+    async def _load_volcano_list(self, now: datetime) -> None:
+        """Names and coordinates, once a day. They are optional: a failure keeps the last list (or none) and the poll
+        goes on, because the level of a volcano needs neither."""
+        if self._volcanoes_at is not None and now - self._volcanoes_at < INTERVAL_VOLCANO_LIST:
+            return
+        try:
+            self._volcanoes = parse_volcano_list(await self.api.get_json(URL_VOLCANO_LIST))
+        except (JmaError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
+            _LOGGER.debug("volcano list unavailable, the last one is kept: %s", err)
+            # asked again at the next poll while there is no list at all, once a day after one has been read
+            self._volcanoes_at = now if self._volcanoes else None
+            return
+        self._volcanoes_at = now
+
+    async def _headline(self, code: str, report_time: str, sem: asyncio.Semaphore) -> str | None:
+        """The headline of one bulletin, from its own file; None when it cannot be had now (asked again next poll)."""
+        cached = self._headlines.get(code)
+        if cached is not None and cached[0] == report_time:
+            return cached[1]
+        try:
+            headline = parse_headline(await _limited(sem, self.api.get_json, URL_VOLCANO_WARNING.format(code=code)))
+        except (JmaError, KeyError, IndexError, TypeError, ValueError, AttributeError) as err:
+            _LOGGER.debug("volcano %s: no headline: %s", code, err)
+            return None
+        self._headlines[code] = (report_time, headline)
+        return headline
+
+    async def _fetch(self) -> VolcanoState:
+        now = dt_util.utcnow()
+        warnings = parse_volcano_warnings(await self.api.get_json(URL_VOLCANO_WARNINGS))
+        await self._load_volcano_list(now)
+        home = (self.cfg.latitude, self.cfg.longitude)
+        found: list[tuple[VolcanoWarning, VolcanoInfo | None, str, float | None]] = []
+        for warning in warnings:
+            info = self._volcanoes.get(warning.code)
+            why = relevance(warning, info, self.cfg.area, home, self.cfg.volcano_radius_km)
+            if why is not None:
+                found.append((warning, info, why[0], why[1]))
+        # highest level first, then the nearest, then by code: the same order every poll
+        found.sort(key=lambda f: (-VOLCANO_KINDS.get(f[0].kind_code, (0,))[0],
+                                  f[3] if f[3] is not None else math.inf, f[0].code))
+        sem = asyncio.Semaphore(TILE_MAX_INFLIGHT)
+        listed = found[:VOLCANO_MAX_LISTED]
+        headlines = await asyncio.gather(*(self._headline(f[0].code, f[0].report_time, sem) for f in listed))
+        by_code = {f[0].code: h for f, h in zip(listed, headlines, strict=True)}
+        self._headlines = {k: v for k, v in self._headlines.items() if k in by_code}
+        volcanoes = [volcano_entry(w, info, why, distance, by_code.get(w.code)) for w, info, why, distance in found]
+        unknown = sorted({w.kind_code for w, _info, _why, _distance in found if w.kind_code not in VOLCANO_KINDS})
+        for kind in unknown:
+            if kind not in self._warned_kinds:
+                self._warned_kinds.add(kind)
+                _LOGGER.warning("volcano: kind code %s is not known to this release (not counted in the level)", kind)
+        # The events are decided last: nothing after this can raise and throw the queued events away.
+        for event_type, data in self._tracker.update(volcanoes):
+            self._emit(event_type, {**data, "area": self.cfg.area_name})
+        if self._tracker.dirty:
+            self._tracker.dirty = False
+            self._save()
+        levels = [v["level"] for v in volcanoes if isinstance(v["level"], int)]
+        return VolcanoState(max(levels, default=0), len(volcanoes), volcanoes[:VOLCANO_MAX_LISTED], unknown,
+                            newest_report(volcanoes))
+
+
 class JapanCoordinator(_JmaCoordinator[JapanForecast]):
     """Nationwide city forecast, today + tomorrow. Optional: not in feed health."""
 
@@ -900,6 +1021,7 @@ class JmaRuntime:
     layers: LayersCoordinator
     japan: JapanCoordinator
     heat_alert: HeatAlertCoordinator
+    volcano: VolcanoCoordinator
     memory: AlertMemory
     debug_simulate: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
@@ -908,7 +1030,7 @@ class JmaRuntime:
     def coordinators(self) -> list[_JmaCoordinator[Any]]:
         return [
             self.forecast, self.hourly, self.amedas, self.warnings, self.nowcast,
-            self.timeline, self.typhoon, self.wbgt, self.layers, self.japan, self.heat_alert,
+            self.timeline, self.typhoon, self.wbgt, self.layers, self.japan, self.heat_alert, self.volcano,
         ]
 
     @property
@@ -924,7 +1046,7 @@ class JmaRuntime:
     def set_alerts_ready(self) -> None:
         """Called once the platforms are set up: events held from the first polls go out now."""
         self.nowcast.alerts_ready = True
-        for emitter in (self.warnings, self.typhoon, self.heat_alert):
+        for emitter in (self.warnings, self.typhoon, self.heat_alert, self.volcano):
             emitter.set_alerts_ready()
 
 

@@ -1,5 +1,5 @@
 """Sensors: warning level + outlook, rain next hour + outlook, radar frames (+ map layers),
-overview, last earthquake, typhoon, WBGT, キキクル at the configured place, nationwide city forecast."""
+overview, last earthquake, typhoon, volcano, WBGT, キキクル at the configured place, nationwide city forecast."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from .const import (
     TSUNAMI_GRADE_KEY,
     URL_NOWC_TILE,
     URL_WARNING_PAGE,
+    VOLCANO_MAX_LISTED,
     WBGT_ATTRIBUTION,
     WBGT_PREF,
 )
@@ -38,6 +39,7 @@ from .coordinator import (
     LayersState,
     NowcastState,
     TyphoonState,
+    VolcanoState,
     WarningsState,
     WbgtState,
     signal_quake,
@@ -74,6 +76,7 @@ async def async_setup_entry(
         sensors.append(WbgtSensor(entry))
     sensors += [
         HeatAlertSensor(entry),
+        VolcanoSensor(entry),
         KikikuruSensor(entry),
         RainOutlookSensor(entry),
         JapanSensor(entry),
@@ -352,6 +355,37 @@ class HeatAlertSensor(_CoordSensor[HeatAlertState]):
             "wbgt_max": b.wbgt_max,
             "wbgt": b.wbgt,
         }
+
+
+class VolcanoSensor(_CoordSensor[VolcanoState]):
+    """The highest 噴火警戒レベル (1-5) among the volcanoes whose bulletin concerns the place; 0 when none does.
+
+    A volcano without levels (JMA gives it a grade, such as 火口周辺危険) is put on the same scale, and its exact grade
+    is in its entry (`kind_code`, `warning_type`, `level_system`). Which volcanoes concern the place: the bulletin names
+    the entry's municipality, or, when it names none, the volcano is within `radius_km` of the home. Attributes:
+    `volcanoes` (highest first, at most VOLCANO_MAX_LISTED), `count` (how many concern the place), `radius_km`,
+    `report_time` (the newest of their reports) and `unknown_codes` (kind codes this release cannot place).
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _unrecorded_attributes = frozenset({"volcanoes"})
+
+    def __init__(self, entry: JmaConfigEntry) -> None:
+        super().__init__(entry, "volcano", entry.runtime_data.volcano)
+
+    @property
+    def native_value(self) -> int | None:
+        d = self.coordinator.data
+        return d.level if d else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        d = self.coordinator.data
+        attrs: dict[str, Any] = {"radius_km": self.runtime.cfg.volcano_radius_km, "max_listed": VOLCANO_MAX_LISTED}
+        if d:
+            attrs.update(count=d.count, volcanoes=d.volcanoes, report_time=d.report_time,
+                         unknown_codes=d.unknown_codes)
+        return attrs
 
 
 class KikikuruSensor(_CoordSensor[LayersState]):

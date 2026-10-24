@@ -35,6 +35,9 @@ from custom_components.jma.const import (
     URL_TYPHOON_FORECAST,
     URL_TYPHOON_SPECS,
     URL_TYPHOON_TARGET,
+    URL_VOLCANO_LIST,
+    URL_VOLCANO_WARNING,
+    URL_VOLCANO_WARNINGS,
     URL_WARNING_TIMELINE,
     URL_WARNINGS,
     URL_WBGT,
@@ -162,6 +165,21 @@ def mock_typhoon_wbgt_and_layers(aioclient_mock: AiohttpClientMocker) -> None:
     aioclient_mock.get(URL_JAPAN_FORECAST, json=load_json("forecast_010000.json"))
     mock_heat_alert(aioclient_mock, {(20260926, 10): "alert_20261003_10.csv",
                                      (20260927, 17): "alert_20261003_17.csv"})
+    mock_volcano(aioclient_mock)
+
+
+# The volcanoes whose own bulletin (warning/<code>.json) is captured in tests/fixtures.
+VOLCANO_BULLETINS = ("503", "506", "113", "326", "331", "509")
+
+
+def mock_volcano(aioclient_mock: AiohttpClientMocker, *, warnings=None) -> None:
+    """Volcano feeds: the captured list of bulletins (14 volcanoes on 2026-10-25), the volcano list and the
+    captured bulletins. No volcano of the capture concerns the tests' place (Chiyoda), so a default setup lists none."""
+    aioclient_mock.get(URL_VOLCANO_WARNINGS,
+                       json=warnings if warnings is not None else load_json("volcano_warning.json"))
+    aioclient_mock.get(URL_VOLCANO_LIST, json=load_json("volcano_list.json"))
+    for code in VOLCANO_BULLETINS:
+        aioclient_mock.get(URL_VOLCANO_WARNING.format(code=code), json=load_json(f"volcano_warning_{code}.json"))
 
 
 def mock_heat_alert(aioclient_mock: AiohttpClientMocker, files: dict[tuple[int, int], str]) -> None:

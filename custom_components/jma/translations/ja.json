@@ -44,11 +44,13 @@
         "data": {
           "station_primary": "主なアメダス観測所のID",
           "station_secondary": "補助のアメダス観測所のID（種別A）",
+          "volcano_radius_km": "火山までの距離（km）",
           "debug_simulate": "テスト用アクション jma.simulate を有効にする"
         },
         "data_description": {
           "station_primary": "気温を観測している最寄りのアメダス観測所です。観測値はまずこの観測所のものを使います。",
           "station_secondary": "最寄りの種別Aの観測所です。気圧と、主な観測所が観測していない値の補完に使います。",
+          "volcano_radius_km": "対象市町村が書かれていない噴火警報・予報は、その火山が Home Assistant の自宅からこの距離以内にあるとき、火山センサーの対象になります。対象市町村が書かれている場合は、距離にかかわらず、あなたの市町村がその中にあるときに対象になります。0にすると距離による判定を行いません。",
           "debug_simulate": "jma.simulate アクションでこのエントリーにテスト用のアラートを発生させられるようにします。通常はオフのままにしてください。"
         }
       }
@@ -109,6 +111,9 @@
           "alert": "熱中症警戒アラート",
           "special": "熱中症特別警戒アラート"
         }
+      },
+      "volcano": {
+        "name": "火山（噴火警戒レベル）"
       }
     },
     "binary_sensor": {
@@ -135,7 +140,9 @@
               "tsunami_cancelled": "津波警報・注意報の解除",
               "typhoon_approach": "台風の接近",
               "typhoon_cleared": "台風の接近の解消",
-              "heat_alert": "熱中症警戒アラートの発表"
+              "heat_alert": "熱中症警戒アラートの発表",
+              "volcano_raised": "噴火警戒レベルの引き上げ",
+              "volcano_lowered": "噴火警戒レベルの引き下げ"
             }
           }
         }

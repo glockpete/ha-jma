@@ -29,7 +29,7 @@ def _load(path: Path):
 def test_english_and_japanese_translations_have_the_same_keys():
     en = set(_keys(_load(COMPONENT / "translations" / "en.json")))
     ja = set(_keys(_load(COMPONENT / "translations" / "ja.json")))
-    assert en == ja and len(en) == 77  # the interface texts and the title
+    assert en == ja and len(en) == 82  # the interface texts and the title
 
 
 def test_every_form_field_has_a_data_description_in_both_languages():

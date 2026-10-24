@@ -13,6 +13,17 @@ and the project uses [semantic versioning](https://semver.org/).
   the 0.6.0 to 0.7.0 releases by hand, so those versions stay installable. If the workflow fails (the manifest
   version doesn't match the tag, or the zip or upload fails), it puts the release back to draft, so HACS never
   offers a version without its asset.
+- **Volcano sensor** (`sensor.jma_<place>_volcano`) from JMA's volcano bulletins (噴火警報・予報, `warning.json`),
+  polled every 5 minutes. The state is the highest 噴火警戒レベル (1 to 5) among the volcanoes that concern the
+  place, 0 when none does. A volcano without levels is placed on the same scale by this integration's own table
+  (the exact JMA grade stays in the attributes). Relevance comes from the data: the municipalities the bulletin
+  lists, else the distance from Home Assistant's home, set by the new option **Volcano distance (km)** (default 50,
+  0 turns the rule off). The attributes list each volcano (names, level, headline, report time, `jma_url`).
+- **Volcano events.** `volcano_raised` and `volcano_lowered` fire on the alerts event entity when the level of a
+  relevant volcano changes. Levels are remembered across restarts, a volcano is lowered to 0 only after two polls
+  without it, and level 0 and 1 count as one state. The `jma.simulate` action accepts both types.
+- **Volcano feed health.** The feed-problem sensor has a `volcano` attribute and the diagnostics list the volcano
+  coordinator.
 
 ### Changed
 

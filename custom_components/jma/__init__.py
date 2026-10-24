@@ -33,6 +33,7 @@ from .const import (
     CONF_OFFICE,
     CONF_STATION_PRIMARY,
     CONF_STATION_SECONDARY,
+    CONF_VOLCANO_RADIUS_KM,
     DOMAIN,
     EVENT_TYPES,
     TSUNAMI_COAST_AREA,
@@ -50,6 +51,7 @@ from .coordinator import (
     LayersCoordinator,
     NowcastCoordinator,
     TyphoonCoordinator,
+    VolcanoCoordinator,
     WarningOutlookCoordinator,
     WarningsCoordinator,
     WbgtCoordinator,
@@ -61,6 +63,7 @@ from .errors import JmaError
 from .memory import AlertMemory
 from .parse_amedas import station_names_from_table
 from .parse_quake import QuakePlace, prefecture_for_office
+from .parse_volcano import radius_km
 from .quake_ws import QuakeClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -126,6 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         station_secondary=data[CONF_STATION_SECONDARY],
         latitude=hass.config.latitude,
         longitude=hass.config.longitude,
+        volcano_radius_km=radius_km(data.get(CONF_VOLCANO_RADIUS_KM)),
     )
     api = JmaApi(async_get_clientsession(hass))
     fire = make_fire(hass, entry.entry_id)
@@ -135,7 +139,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
     # area 東京都２３区, chosen by its area code.
     local_name = data.get(CONF_AREA_NAME_JA) or _legacy_name(data)
     place = QuakePlace.for_entry(prefecture_for_office(cfg.office), local_name, cfg.area)
-    # What was already announced about typhoons, heat alerts and tsunami survives a restart.
+    # What was already announced about typhoons, heat alerts, tsunami and volcano levels survives a restart.
     memory = AlertMemory(hass, entry.entry_id)
     await memory.async_load()
     # Alerts decided while Home Assistant is still starting are only remembered once it runs.
@@ -155,14 +159,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         nowcast=NowcastCoordinator(hass, entry, api, cfg, fire),
         quake=QuakeClient(hass, api, fire, on_quake, place, memory=memory.tsunami, save=memory.save,
                           tsunami_area=TSUNAMI_COAST_AREA.get(cfg.class10)),
-        # Optional data: no events, no pushes, not part of feed health. The typhoon and heat-alert
-        # coordinators also raise events.
+        # Optional data: no events, no pushes, not part of feed health. The typhoon, heat-alert and volcano
+        # coordinators also raise events; the volcano feed is also part of feed health (binary_sensor.feed_conditions).
         timeline=WarningOutlookCoordinator(hass, entry, api, cfg),
         typhoon=TyphoonCoordinator(hass, entry, api, cfg, fire, memory.typhoon, memory.save),
         wbgt=WbgtCoordinator(hass, entry, api, cfg),
         layers=LayersCoordinator(hass, entry, api, cfg),
         japan=JapanCoordinator(hass, entry, api, cfg),
         heat_alert=HeatAlertCoordinator(hass, entry, api, cfg, fire, memory.heat, memory.save),
+        volcano=VolcanoCoordinator(hass, entry, api, cfg, fire, memory.volcano, memory.save),
         memory=memory,
         debug_simulate=bool(data.get(CONF_DEBUG_SIMULATE)),
     )

@@ -25,6 +25,7 @@ from custom_components.jma.const import (
     URL_RASRF_TIMES,
     URL_RISK_TIMES,
     URL_TYPHOON_TARGET,
+    URL_VOLCANO_WARNINGS,
     URL_WARNING_TIMELINE,
     URL_WARNINGS,
     URL_WBGT,
@@ -68,6 +69,9 @@ FEEDS: dict[str, tuple[str, list[tuple[str, str, Any]]]] = {
                                       _rename(load_json("warning_timeline_130000.json"), "timeDefines", "timeDefinesRenamed"))]),
     "japan": ("japan", [(URL_JAPAN_FORECAST, "json",
                          _rename(load_json("forecast_010000.json"), "timeSeries", "timeSeriesRenamed"))]),
+    # every bulletin of the captured list loses its volcano code: none can be read
+    "volcano": ("volcano", [(URL_VOLCANO_WARNINGS, "json",
+                             _rename(load_json("volcano_warning.json"), "eventId", "eventIdRenamed"))]),
 }
 
 
@@ -255,12 +259,12 @@ def test_every_coordinator_of_the_runtime_has_a_case_here() -> None:
     runtime_coordinators = {f.name for f in dataclasses.fields(JmaRuntime)
                             if isinstance(getattr(coordinator_module, str(f.type), None), type)
                             and issubclass(getattr(coordinator_module, str(f.type)), _JmaCoordinator)}
-    assert len(runtime_coordinators) == 11
+    assert len(runtime_coordinators) == 12
     assert covered == runtime_coordinators
 
 
 @pytest.mark.parametrize("attr", ["forecast", "hourly", "amedas", "warnings", "nowcast", "timeline", "typhoon",
-                                  "wbgt", "layers", "japan"])
+                                  "wbgt", "layers", "japan", "volcano"])
 async def test_an_attribute_error_out_of_a_fetch_is_handled_where_the_others_are(
         tokyo: HomeAssistant, aioclient_mock, entry, caplog, attr) -> None:
     """The coordinator wrapper catches AttributeError (a field that changed its type reaches `.get` on a

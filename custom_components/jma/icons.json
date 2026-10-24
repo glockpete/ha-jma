@@ -51,6 +51,16 @@
           "alert": "mdi:thermometer-alert",
           "special": "mdi:thermometer-high"
         }
+      },
+      "volcano": {
+        "default": "mdi:volcano",
+        "range": {
+          "0": "mdi:volcano-outline",
+          "2": "mdi:volcano",
+          "3": "mdi:alert",
+          "4": "mdi:alert-octagon",
+          "5": "mdi:alert-octagram"
+        }
       }
     },
     "event": {

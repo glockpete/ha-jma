@@ -155,6 +155,7 @@ def _runtime(now, *, primary_ok, secondary_ok, first_try, hourly_ok, same_statio
         forecast=SimpleNamespace(data=None),
         quake=SimpleNamespace(enabled=True, connected=True, down_since=None),
         hourly=SimpleNamespace(last_ok=hourly_ok, first_try=first_try, last_error="timeout"),
+        volcano=SimpleNamespace(last_ok=now, first_try=first_try, last_error=None),
     )
 
 

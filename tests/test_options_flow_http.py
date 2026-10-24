@@ -28,7 +28,7 @@ async def test_the_options_form_is_served_over_http(tokyo: HomeAssistant, aiocli
     form = await response.json()
     assert form["type"] == "form" and form["step_id"] == "init"
     fields = {f["name"]: f for f in form["data_schema"]}
-    assert set(fields) == {"station_primary", "station_secondary", "debug_simulate"}
+    assert set(fields) == {"station_primary", "station_secondary", "volcano_radius_km", "debug_simulate"}
     assert fields["station_primary"]["default"] == entry.data["station_primary"]
     assert fields["debug_simulate"]["default"] is False
 

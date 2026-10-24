@@ -34,6 +34,7 @@ CONF_AREA: Final = "area"
 CONF_STATION_PRIMARY: Final = "station_primary"
 CONF_STATION_SECONDARY: Final = "station_secondary"
 CONF_DEBUG_SIMULATE: Final = "debug_simulate"
+CONF_VOLCANO_RADIUS_KM: Final = "volcano_radius_km"
 
 BOSAI: Final = "https://www.jma.go.jp/bosai"
 URL_AREA: Final = f"{BOSAI}/common/const/area.json"
@@ -78,6 +79,14 @@ WBGT_ATTRIBUTION: Final = (
 # 環境省 熱中症警戒アラート / 熱中症特別警戒アラート, one CSV per issue (05, 10, 14, 17 JST), named for the
 # issue date (manual R08_wbgt_data_service_manual.pdf p.2; fetched live 2026-10-03). UTF-8, LF.
 URL_HEAT_ALERT: Final = "https://www.wbgt.env.go.jp/alert/dl/{year}/alert_{ymd}_{hh}.csv"
+# ---- volcanoes (噴火警報・予報), all fetched live 2026-10-25 JST ----
+# One list of the volcanoes with a current bulletin ({reportDatetime, eventId, areas, volcanoInfos}), one
+# bulletin per volcano (the same record plus the headline text), and the list of the 120 volcanoes (name, name_en,
+# latlon). The page URL is the form JMA's own volcano page reads from the address (#type=warning&event_id=<code>).
+URL_VOLCANO_WARNINGS: Final = f"{BOSAI}/volcano/data/warning.json"
+URL_VOLCANO_WARNING: Final = BOSAI + "/volcano/data/warning/{code}.json"
+URL_VOLCANO_LIST: Final = f"{BOSAI}/volcano/const/volcano_list.json"
+URL_VOLCANO_PAGE: Final = BOSAI + "/volcano/#type=warning&event_id={code}"
 # Frame lists for map layers (targetTimes send no CORS header, so a browser cannot read them; HA relays them).
 URL_RISK_TIMES: Final = f"{BOSAI}/jmatile/data/risk/targetTimes.json"
 URL_RASRF_TIMES: Final = f"{BOSAI}/jmatile/data/rasrf/targetTimes.json"
@@ -153,6 +162,8 @@ INTERVAL_WBGT: Final = timedelta(minutes=60)  # the CSV has 3-hourly steps, issu
 INTERVAL_LAYERS: Final = timedelta(minutes=5)
 INTERVAL_JAPAN: Final = timedelta(minutes=30)
 INTERVAL_HEAT_ALERT: Final = timedelta(minutes=20)  # a new file at most four times a day
+INTERVAL_VOLCANO: Final = timedelta(minutes=5)  # a 12 KB list that changes when a bulletin is issued, any hour
+INTERVAL_VOLCANO_LIST: Final = timedelta(hours=24)  # the volcano list (names, coordinates) is constant data
 # Data older than this multiple of its interval makes the entities unavailable.
 STALE_FACTOR: Final = 3
 
@@ -176,6 +187,7 @@ HEALTH_NOWCAST_MAX_AGE: Final = timedelta(minutes=20)
 # JMA issues at 05/11/17 JST, so the feed has an overnight gap of 12 h and a limit shorter than that would flag a problem every night.
 HEALTH_FORECAST_MAX_AGE: Final = timedelta(hours=13)
 HEALTH_QUAKE_MAX_DOWN: Final = timedelta(minutes=10)
+HEALTH_VOLCANO_MAX_AGE: Final = timedelta(minutes=15)  # three polls
 
 EVENT_TYPES: Final = (
     "warning_issued",
@@ -193,6 +205,8 @@ EVENT_TYPES: Final = (
     "typhoon_approach",
     "typhoon_cleared",
     "heat_alert",
+    "volcano_raised",
+    "volcano_lowered",
 )
 
 # r8 weather-warning code -> (phenomenon, level). Transcribed from the JMA warning page JS.
@@ -425,3 +439,36 @@ HEAT_ALERT_PUBLISH_LAG: Final = timedelta(minutes=6)  # Last-Modified is ~5 min 
 HEAT_ALERT_STATUS_NORMAL: Final = "通常"  # 訓練 (drill) and 試験 (test) files never alert
 HEAT_ALERT_GRADE: Final[dict[str, str]] = {"1": "alert", "3": "special"}
 HEAT_ALERT_MEMORY_MAX: Final = 40
+
+# ---- volcanoes ----
+# JMA's kind code of a volcano in warning.json ("噴火警報・予報（対象火山）" item `code`) -> (level on the sensor's
+# 1-5 scale, whether JMA's 噴火警戒レベル applies to that volcano, warning type, JMA's English wording). The codes
+# and the wording are the tables of JMA's own volcano page (https://www.jma.go.jp/bosai/volcano/, read 2026-10-25).
+# 11-15 are the five levels. A volcano without levels carries a grade instead (21/35 forecast, 22/23 crater-area
+# warning, 25 residential-area warning, 36 sea-area warning). JMA gives no scale for those: the number on the
+# sensor puts a grade next to the level of the same warning type (22 below 23, as JMA's own step from 23 to
+# 22 is a "引下げ"; 25 at the lower end of the residential band 4-5; 36 beside the crater-area grade). The exact
+# grade is always in the attributes (`kind_code`, `warning_type`, `level_system`).
+VOLCANO_KINDS: Final[dict[str, tuple[int, bool, str, str]]] = {
+    "11": (1, True, "forecast", "Level 1 (Potential for increased activity)"),
+    "12": (2, True, "crater", "Level 2 (Restriction on proximity to the crater)"),
+    "13": (3, True, "crater", "Level 3 (Restriction on proximity to the volcano)"),
+    "14": (4, True, "residential", "Level 4 (Evacuation of the elderly, etc.)"),
+    "15": (5, True, "residential", "Level 5 (Evacuation)"),
+    "21": (1, False, "forecast", "Potential for increased activity"),
+    "22": (2, False, "crater", "Caution advised around the crater"),
+    "23": (3, False, "crater", "Caution advised in non-residential areas near the crater"),
+    "25": (4, False, "residential", "Extreme caution advised in residential areas"),
+    "35": (1, False, "forecast", "Potential for increased activity"),
+    "36": (2, False, "sea", "Caution advised for the sea area in the vicinity of the volcano"),
+}
+# A bulletin that lists no municipality is matched by distance: the volcano counts when it lies within this many
+# km of Home Assistant's home (option `volcano_radius_km`, 0 turns the distance rule off). A bulletin that lists
+# municipalities is matched by them alone. The 50 km default is this integration's own choice, not a JMA figure.
+VOLCANO_RADIUS_DEFAULT_KM: Final = 50
+VOLCANO_RADIUS_MAX_KM: Final = 500
+VOLCANO_MAX_LISTED: Final = 10  # volcanoes in the sensor attribute (highest level first); the state counts all
+VOLCANO_HEADLINE_MAX: Final = 300  # characters of JMA's headline kept in the attribute and the event
+# A remembered volcano that is missing from warning.json is announced as lowered to 0 only after this many polls in a
+# row without it, so one partial file from the CDN does not send a "lowered" and then a "raised".
+VOLCANO_ABSENT_POLLS: Final = 2
