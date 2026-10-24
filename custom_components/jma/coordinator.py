@@ -79,7 +79,6 @@ from .const import (
     VOLCANO_MAX_LISTED,
     VOLCANO_RADIUS_DEFAULT_KM,
     WARNINGS_SUSPECT_MAX_POLLS,
-    WBGT_PREF,
 )
 from .errors import JmaError, JmaFetchError, JmaParseError
 from .memory import AlertMemory
@@ -148,7 +147,7 @@ from .parse_warnings import (
     suspect_reason,
 )
 from .parse_warnings import Warning as AreaWarning
-from .parse_wbgt import WbgtForecast, parse_wbgt
+from .parse_wbgt import WbgtForecast, WbgtPoint, nearest_points, parse_wbgt, pref_file_for_office
 
 if TYPE_CHECKING:
     from .quake_ws import QuakeClient
@@ -623,34 +622,48 @@ class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
 
 @dataclass(frozen=True)
 class WbgtState:
-    forecast: WbgtForecast | None  # None: out of season, 404, empty, or the office is not mapped
+    """forecast: None out of season, on a 404, for an empty file or one without a row for the points.
+    season: today (JST) is inside the Ministry's season. points: the nearest points of the office's prefecture file
+    to the entry's place, nearest first (empty when the office has no file), whatever the file held."""
+
+    forecast: WbgtForecast | None
+    season: bool = True
+    points: tuple[WbgtPoint, ...] = ()
 
 
 _JST = timezone(timedelta(hours=9))
 
 
 class WbgtCoordinator(_JmaCoordinator[WbgtState]):
-    """環境省 WBGT forecast. "No data" is a quiet, successful poll (debug log only)."""
+    """環境省 WBGT forecast of the nearest WBGT point to the entry's place, from the file of its prefecture.
+
+    "No data" is a quiet, successful poll (debug log only). Outside the season (the Ministry's, as for the heat
+    alerts) nothing is requested: the files stay up with the last issue of the season, and a 404 may come at its
+    start. The sensor reads `season` and shows unknown, so the end of the season is not a feed problem.
+    """
 
     def __init__(self, hass: HomeAssistant, entry: JmaConfigEntry, api: JmaApi, cfg: JmaConfig) -> None:
         super().__init__(hass, entry, api, cfg, "wbgt", INTERVAL_WBGT)
+        self.pref = pref_file_for_office(cfg.office)
+        self.points = nearest_points(self.pref, cfg.latitude, cfg.longitude)
 
     async def _fetch(self) -> WbgtState:
-        pref = WBGT_PREF.get(self.cfg.office)
-        if pref is None:
-            _LOGGER.debug("wbgt: no CSV mapped for office %s", self.cfg.office)
-            return WbgtState(None)
-        body = await self.api.get_bytes(URL_WBGT.format(pref=pref))
+        today = dt_util.utcnow().astimezone(_JST).date()
+        season = in_season(today)
+        if self.pref is None or not self.points:
+            _LOGGER.debug("wbgt: no CSV for office %s", self.cfg.office)
+            return WbgtState(None, season, self.points)
+        if not season:
+            return WbgtState(None, False, self.points)
+        body = await self.api.get_bytes(URL_WBGT.format(pref=self.pref))
         if body is None:
             _LOGGER.debug("wbgt: CSV not published (404)")
-            return WbgtState(None)
-        today = dt_util.utcnow().astimezone(_JST).date()
+            return WbgtState(None, True, self.points)
         forecast = parse_wbgt(body.decode("utf-8", errors="replace"),
-                              (self.cfg.station_primary, self.cfg.station_secondary), today)
+                              tuple(point.number for point in self.points), today)
         if forecast is None:
-            _LOGGER.debug("wbgt: no usable row for %s / %s",
-                          self.cfg.station_primary, self.cfg.station_secondary)
-        return WbgtState(forecast)
+            _LOGGER.debug("wbgt: no usable row for the %d nearest points of %s", len(self.points), self.pref)
+        return WbgtState(forecast, True, self.points)
 
 
 @dataclass(frozen=True)

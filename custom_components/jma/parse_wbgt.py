@@ -1,9 +1,13 @@
-"""Parse the 環境省 WBGT (暑さ指数) forecast CSV for one AMeDAS station. No HA imports.
+"""Parse the 環境省 WBGT (暑さ指数) forecast CSV for one WBGT point. No HA imports.
 
 https://www.wbgt.env.go.jp/prev15WG/dl/yohou_{pref}.csv: a header row
-`,,2026092724,2026092803,...` (YYYYMMDDHH, 3-hourly, HH 03..24) and one row per station:
-`44132,2026/09/27 22:25, 200, 210, ...` (station id, issued, values x10). Outside the season the
-file may be missing (404) or empty; that is "no data", not an error.
+`,,2026092724,2026092803,...` (YYYYMMDDHH, 3-hourly, HH 03..24) and one row per point:
+`44132,2026/09/27 22:25, 200, 210, ...` (point number, issued, values x10). Outside the season the
+file may be missing (404) or empty, or it keeps the last issue of the season; that is "no data", not an error.
+
+Which file and which point an entry reads is decided here too: `pref_file_for_office` (the file of the office's
+prefecture) and `nearest_points` (the points of that file, nearest to the entry's place first; the positions are
+the Ministry's own point master, wbgt_points.py).
 """
 
 from __future__ import annotations
@@ -12,7 +16,32 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from .const import WBGT_NEAREST_POINTS, WBGT_PREF_FILE
+from .parse_typhoon import haversine_km
+from .wbgt_points import WBGT_POINTS
+
 JST = timezone(timedelta(hours=9))
+
+
+@dataclass(frozen=True)
+class WbgtPoint:
+    number: str  # the point number: the AMeDAS station number, the row key of the file
+    name: str  # 観測所名 as the Ministry writes it
+    km: float  # from the entry's place
+
+
+def pref_file_for_office(office: Any) -> str | None:
+    """The prefecture file of a forecast office: its first two digits are the prefecture number. None for a
+    value that is not an office code."""
+    return WBGT_PREF_FILE.get(office[:2]) if isinstance(office, str) else None
+
+
+def nearest_points(pref: str | None, lat: float, lon: float, count: int = WBGT_NEAREST_POINTS) -> tuple[WbgtPoint, ...]:
+    """The `count` points of the prefecture file nearest to (lat, lon), nearest first; empty for an unknown file."""
+    ranked = sorted(
+        (haversine_km(lat, lon, plat, plon), number, name)
+        for number, name, plat, plon in WBGT_POINTS.get(pref or "", ()))
+    return tuple(WbgtPoint(number, name, round(km, 1)) for km, number, name in ranked[:count])
 
 
 @dataclass(frozen=True)

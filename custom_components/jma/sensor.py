@@ -30,7 +30,6 @@ from .const import (
     URL_WARNING_PAGE,
     VOLCANO_MAX_LISTED,
     WBGT_ATTRIBUTION,
-    WBGT_PREF,
 )
 from .coordinator import (
     ForecastBundle,
@@ -69,12 +68,7 @@ async def async_setup_entry(
         TsunamiSensor(entry),
         WarningOutlookSensor(entry),
         TyphoonSensor(entry),
-    ]
-    # The heat index exists only for offices whose CSV file name is known (WBGT_PREF); for any other
-    # office the sensor is not created, rather than left unavailable for ever.
-    if entry.runtime_data.cfg.office in WBGT_PREF:
-        sensors.append(WbgtSensor(entry))
-    sensors += [
+        WbgtSensor(entry),
         HeatAlertSensor(entry),
         VolcanoSensor(entry),
         KikikuruSensor(entry),
@@ -271,7 +265,12 @@ class TyphoonSensor(_CoordSensor[TyphoonState]):
 
 
 class WbgtSensor(_CoordSensor[WbgtState]):
-    """Today's (JST) highest forecast WBGT (暑さ指数). Unavailable out of season.
+    """Today's (JST) highest forecast WBGT (暑さ指数) at the nearest 環境省 WBGT point, for every office.
+
+    The point is the nearest of the office's prefecture file to the home of Home Assistant; when the file has no row
+    for it, the next nearest (up to three). Unknown, not unavailable, while there is no figure: out of season
+    (`season` false, nothing is requested), before the first file of the season, or when the file holds no figure for
+    today. Unavailable only when the file cannot be fetched or read for longer than the other feeds are kept.
 
     No device class: WBGT is not an air temperature.
     """
@@ -285,11 +284,6 @@ class WbgtSensor(_CoordSensor[WbgtState]):
         super().__init__(entry, "wbgt", entry.runtime_data.wbgt)
 
     @property
-    def available(self) -> bool:
-        d = self.coordinator.data
-        return super().available and d is not None and d.forecast is not None
-
-    @property
     def native_value(self) -> float | None:
         d = self.coordinator.data
         return d.forecast.today_max if d and d.forecast else None
@@ -297,10 +291,17 @@ class WbgtSensor(_CoordSensor[WbgtState]):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         d = self.coordinator.data
-        if not d or not d.forecast:
+        if not d:
             return {}
         f = d.forecast
-        return {"series": f.series, "issued": f.issued, "station": f.station}
+        # The point the figure is for; with no file, the nearest one (the one that will be asked for first).
+        point = next((p for p in d.points if f and p.number == f.station), d.points[0] if d.points else None)
+        attrs: dict[str, Any] = {"season": d.season}
+        if point:
+            attrs.update(station=point.number, station_name=point.name, station_km=point.km)
+        if f:
+            attrs.update(series=f.series, issued=f.issued)
+        return attrs
 
 
 class HeatAlertSensor(_CoordSensor[HeatAlertState]):

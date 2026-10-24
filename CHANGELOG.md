@@ -21,6 +21,14 @@ and the project uses [semantic versioning](https://semver.org/).
   height, arrival time and condition of that area. New attributes of the sensor and new keys of the `tsunami` event:
   `home_areas` (the list of the coast areas of the place; `home_area` stays, with the names joined by ` / `) and
   `home_area_in_force` (the area the grade comes from). `tsunami_cancelled` has `home_areas` too.
+- **Heat index (WBGT) for every prefecture.** `sensor.jma_<place>_wbgt` was created only for the Tokyo office. It now
+  exists for all 58 forecast offices and reads the Ministry of the Environment's `yohou_<prefecture>.csv` of the
+  office's prefecture (the first two digits of the office code; the Hokkaido, Amami and Okinawa offices read the
+  `hokkaido`, `kagoshima` and `okinawa` files). The point is the one nearest to the home of Home Assistant among the
+  prefecture's points, taken from the Ministry's point master (`wbgt_point_master-20260515.csv`, 841 points, built
+  into `wbgt_points.py` by `scripts/gen_wbgt_points.py`); if the file has no row for it, the next two nearest are
+  tried. New attributes: `station_name`, `station_km` and `season`. Tokyo Station is still served by point 44132.
+  The 47 file names answered HTTP 200 and together list the same 841 points as the point master on 2026-10-25.
 - **Release asset.** Every published release carries `jma.zip`, the integration folder zipped by the new
   `release.yml` workflow. `hacs.json` names it (`zip_release`, `filename`), so HACS and the Home Assistant
   Marketplace fetch one file instead of every file of the folder, and count the downloads. The asset was added to
@@ -43,6 +51,12 @@ and the project uses [semantic versioning](https://semver.org/).
 
 - **Tokyo keeps its coast area.** JMA's list names six of the 23 wards (and the island villages, and no town of the
   Tokyo mainland). A place in Tokyo that is not on it keeps the Tokyo Bay grade it had, so no Tokyo entry changes.
+- **Heat index outside the season is `unknown`, not `unavailable`.** The Ministry's season (the fourth Wednesday of
+  April for 26 weeks, the same as for the heat alerts: 22 April to 21 October in 2026) is read in Japan time. Outside
+  it the integration asks for no file (the Ministry leaves the last issue of the season online), the sensor shows
+  `unknown` with `season` `false`, and nothing is logged above debug. A file that is not out yet in season (HTTP 404) is
+  `unknown` too. The sensor is `unavailable` only when the file cannot be fetched or read for longer than three
+  polls. The heat index is still not part of the feed-problem sensor.
 - **Quality scale tier `custom`.** `manifest.json` now declares `custom`, the tier Home Assistant gives every
   integration outside core, instead of `platinum`. `quality_scale.yaml` still lists all 54 rules met or exempt.
 - **Only releases are offered.** `hide_default_branch` in `hacs.json` removes the `main` branch from the version

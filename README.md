@@ -100,7 +100,7 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
 - **Tsunami.** The tsunami grade for your coast as a sensor, and events.
 - **Heat stroke.** The Ministry of the Environment's heat-stroke alerts (熱中症警戒アラート, heat-stroke alert, and
   熱中症特別警戒アラート, special heat-stroke alert), and the forecast heat index (WBGT,
-  wet-bulb globe temperature) where it is available.
+  wet-bulb globe temperature) at the nearest of the Ministry's points, in every prefecture.
 - **Volcanoes.** The highest 噴火警戒レベル (volcanic alert level) among the volcanoes that concern your place, as a
   sensor with the volcanoes listed, and an event when one of those levels changes.
 - **Health.** A feed-problem sensor, repair issues for a missing earthquake connection or a silent weather station,
@@ -441,7 +441,7 @@ is installed. In the entity ids below, `<place>` is the lower-case English name 
 |---|---|
 | `sensor.jma_<place>_typhoon` | The number of active tropical cyclones (0 is a normal value). The `storms` attribute lists each storm: position, pressure, wind, forecast track, past track, distance to your home, closest approach and approach `stage` (`none`, `notice` or `urgent`). |
 | `sensor.jma_<place>_heat_alert` | Today's heat-stroke alert for the prefecture: `none`, `alert` (熱中症警戒アラート) or `special` (熱中症特別警戒アラート). The attributes show what is issued for tomorrow and the forecast WBGT figures of the prefecture's stations. Unavailable out of season. |
-| `sensor.jma_<place>_wbgt` | Today's highest forecast heat index (WBGT), in °C. Only created for the Tokyo office (see [Known limits](#known-limits)). Unavailable out of season. |
+| `sensor.jma_<place>_wbgt` | Today's highest forecast heat index (WBGT), in °C, at the nearest of the Ministry of the Environment's 841 WBGT points to the home of Home Assistant, among the points of your forecast office's prefecture. It exists for every office. The attributes `station` (the point number), `station_name` and `station_km` (the distance from your home) say which point it is; `series` (3-hourly figures for three days) and `issued` come from the forecast file. Outside the Ministry's season (22 April to 21 October in 2026) nothing is requested: the state is `unknown` and `season` is `false`. |
 
 ### Volcanoes
 
@@ -658,7 +658,7 @@ The sensor also has `connected`: whether the connection to P2P地震情報 is op
 | Typhoons (JMA) | 30 minutes | `INTERVAL_TYPHOON` |
 | Nationwide city forecast (JMA) | 30 minutes | `INTERVAL_JAPAN` |
 | Hourly forecast (Open-Meteo) | 60 minutes | `INTERVAL_HOURLY` |
-| Heat index (Ministry of the Environment) | 60 minutes | `INTERVAL_WBGT` |
+| Heat index (Ministry of the Environment; the file of your prefecture, in season only) | 60 minutes | `INTERVAL_WBGT` |
 | Earthquakes, early warnings and tsunami information (P2P地震情報) | Pushed. Each place keeps one WebSocket open (at most two places per home, see [Known limits](#known-limits)). The recent history and the tsunami list are read on every connect. | `URL_P2P_WS`, `URL_P2P_HISTORY`, `URL_P2P_TSUNAMI` |
 | Expiry of a tsunami bulletin that was never cancelled (a clock tick, not a feed) | 10 minutes. Only an entry with an earthquake connection has the timer. | `TSUNAMI_TICK` in `__init__.py` |
 
@@ -753,9 +753,15 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   Tokyo mainland, a place that is not on JMA's list (JMA names six wards and the island villages) still follows
   東京湾内湾, as every Tokyo entry did before the list was used. The list changes when JMA changes the areas; it
   is made by `scripts/build_tsunami_coast.py` (see [Contributing](CONTRIBUTING.md#the-tsunami-coast-table)).
-- **The heat index (WBGT) sensor exists only for the Tokyo office (`130000`)**, the only office whose file name
-  the integration knows. For every other office the sensor is not created. The heat-stroke alert sensor works for
-  every office.
+- **The heat index (WBGT) point is the nearest one inside your office's prefecture.** The sensor reads the file of the
+  prefecture (the first two digits of the office code: the seven Hokkaido offices read `hokkaido`, the Amami office
+  reads `kagoshima`, the four Okinawa offices read `okinawa`) and takes the point nearest to the home of Home Assistant
+  from the Ministry's list of points. A home just across a prefecture border is served by a point of the office's
+  prefecture, and `station_km` says how far it is. If the file has no row for that point it tries the next two nearest.
+  The Ministry publishes the figures only in its season, from the fourth Wednesday of April for 26 weeks (22 April to
+  21 October in 2026); outside it the sensor is `unknown` with `season` `false`, and a file that is not out yet on the
+  first days is `unknown` too. The list of points is the Ministry's `wbgt_point_master-20260515.csv` (841 points in
+  service); a point the Ministry adds or renumbers is missing here until the list in the integration is regenerated.
 - **Only the 23 special wards of Tokyo have an area.** Everywhere else, including the Tama cities and the islands
   of Tokyo, earthquake events and early warnings follow the whole prefecture. The finer areas of other
   prefectures are not mapped.
@@ -868,8 +874,12 @@ Where a service states no rate limit, none is given here. The intervals in
   `attribution` of the WBGT and heat-alert sensors carries both sentences with the site address, with "XX Survey"
   written as the site's name.
 - **Terms:** see the ministry's page <https://www.wbgt.env.go.jp/en/tos.php>.
-- **Files used:** `https://www.wbgt.env.go.jp/prev15WG/dl/yohou_<pref>.csv` (heat index) and
-  `https://www.wbgt.env.go.jp/alert/dl/<year>/alert_<yyyymmdd>_<hh>.csv` (alerts).
+- **Files used:** `https://www.wbgt.env.go.jp/prev15WG/dl/yohou_<pref>.csv` (heat index; one file for each of the 47
+  prefectures, for example `yohou_tokyo.csv`; the integration reads one file per entry) and
+  `https://www.wbgt.env.go.jp/alert/dl/<year>/alert_<yyyymmdd>_<hh>.csv` (alerts). The positions of the 841 points
+  come from the Ministry's point master, `https://www.wbgt.env.go.jp/man15NH/wbgt_point_master-20260515.csv`, built
+  into the integration (`wbgt_points.py`, made by `scripts/gen_wbgt_points.py`); it is not fetched while running.
+  Outside the season (the fourth Wednesday of April, 26 weeks) no file is requested.
 
 ### Geospatial Information Authority of Japan
 
@@ -930,8 +940,10 @@ Where a service states no rate limit, none is given here. The intervals in
   | No JMA entry has the debug option on. Switch on "Enable the jma.simulate test action" in the options of an entry. | `simulate_no_debug_entry` | `config_entry_id` was left empty and no loaded entry has the option on. Switch it on under **Configure**. |
 
 - **A repair issue appears.** See [Repair issues](#repair-issues).
-- **No heat-index sensor.** This is expected outside Tokyo: the heat index needs the Tokyo office. See
-  [Known limits](#known-limits).
+- **The heat-index sensor is `unknown`.** Outside the Ministry's season (22 April to 21 October in 2026; the
+  attribute `season` is `false`) it has no figure and asks for nothing. In season it is `unknown` when the
+  prefecture's file is not out yet or holds no row for the nearest points, and today's figure is missing when the
+  file has no slot left for today. See [Known limits](#known-limits).
 - **The tsunami sensor is always `none`.** That is the right state when no tsunami information is in force for your
   coast area. Its `home_areas` attribute shows the coast areas of your municipality. If it is empty, your
   municipality is not on JMA's list of coastal municipalities. See [Known limits](#known-limits).

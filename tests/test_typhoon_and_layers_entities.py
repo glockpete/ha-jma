@@ -42,6 +42,8 @@ async def test_optional_entities_from_sample_files(tokyo: HomeAssistant, aioclie
     wbgt = hass.states.get("sensor.jma_chiyoda_wbgt")
     assert float(wbgt.state) == 20.0  # 44132, the 27th's only slot left (24時)
     assert wbgt.attributes["station"] == "44132"
+    assert wbgt.attributes["station_name"] == "東京" and wbgt.attributes["station_km"] == 1.9  # nearest to Tokyo Station
+    assert wbgt.attributes["season"] is True
     assert wbgt.attributes["attribution"] == WBGT_ATTRIBUTION
     assert wbgt.attributes["unit_of_measurement"] == "°C"
     assert "device_class" not in wbgt.attributes
@@ -72,7 +74,7 @@ async def test_optional_entities_from_sample_files(tokyo: HomeAssistant, aioclie
     assert not {"timeline", "typhoon", "wbgt", "layers", "japan"} & set(problem.attributes)
 
 
-async def test_wbgt_out_of_season_is_quietly_unavailable(
+async def test_wbgt_missing_file_is_a_quiet_unknown(
     tokyo: HomeAssistant, aioclient_mock, entry, freezer, caplog
 ) -> None:
     hass = tokyo
@@ -81,7 +83,9 @@ async def test_wbgt_out_of_season_is_quietly_unavailable(
     aioclient_mock.get(URL_WBGT.format(pref="tokyo"), status=404)  # first registration wins
     mock_jma(aioclient_mock)
     await setup(hass, entry)
-    assert hass.states.get("sensor.jma_chiyoda_wbgt").state == "unavailable"
+    wbgt = hass.states.get("sensor.jma_chiyoda_wbgt")
+    assert wbgt.state == "unknown" and wbgt.attributes["season"] is True  # in season, the file is not out
+    assert wbgt.attributes["station"] == "44132"  # the point that will be read
     # Only the integration's own loggers: asyncio's slow-task warning (a freezer artefact) names this test.
     loud = [r for r in caplog.records if r.levelno >= logging.WARNING
             and r.name.startswith("custom_components.jma") and "wbgt" in r.getMessage().lower()]

@@ -65,10 +65,25 @@ URL_WARNING_TIMELINE: Final = BOSAI + "/warning_timeline/data/{office}.json"
 URL_TYPHOON_TARGET: Final = f"{BOSAI}/typhoon/data/targetTc.json"
 URL_TYPHOON_FORECAST: Final = BOSAI + "/typhoon/data/{tc}/forecast.json"
 URL_TYPHOON_SPECS: Final = BOSAI + "/typhoon/data/{tc}/specifications.json"
-# 環境省 WBGT forecast, one CSV per prefecture. Only the offices below are mapped (an office is added
-# only with a file name checked against the Ministry's site); for any other office there is no WBGT sensor.
+# 環境省 WBGT forecast, one CSV per prefecture (the Ministry also serves one per point, yohou_<point>.csv, and one for
+# the whole country, yohou_all.csv). A forecast office reads the file of its prefecture: the first two digits of the
+# office code are the prefecture number of PREFECTURES below (014030 十勝, 460040 奄美 and 474000 八重山 are Hokkaido,
+# Kagoshima and Okinawa). All 47 names answered HTTP 200 on 2026-10-25, and together the files list the same 841 points
+# as yohou_all.csv and the Ministry's point master (wbgt_points.py).
 URL_WBGT: Final = "https://www.wbgt.env.go.jp/prev15WG/dl/yohou_{pref}.csv"
-WBGT_PREF: Final[dict[str, str]] = {"130000": "tokyo"}
+WBGT_PREF_FILE: Final[dict[str, str]] = {
+    "01": "hokkaido", "02": "aomori", "03": "iwate", "04": "miyagi", "05": "akita", "06": "yamagata",
+    "07": "fukushima", "08": "ibaraki", "09": "tochigi", "10": "gunma", "11": "saitama", "12": "chiba",
+    "13": "tokyo", "14": "kanagawa", "15": "niigata", "16": "toyama", "17": "ishikawa", "18": "fukui",
+    "19": "yamanashi", "20": "nagano", "21": "gifu", "22": "shizuoka", "23": "aichi", "24": "mie",
+    "25": "shiga", "26": "kyoto", "27": "osaka", "28": "hyogo", "29": "nara", "30": "wakayama",
+    "31": "tottori", "32": "shimane", "33": "okayama", "34": "hiroshima", "35": "yamaguchi", "36": "tokushima",
+    "37": "kagawa", "38": "ehime", "39": "kochi", "40": "fukuoka", "41": "saga", "42": "nagasaki",
+    "43": "kumamoto", "44": "oita", "45": "miyazaki", "46": "kagoshima", "47": "okinawa",
+}
+# How many of the nearest points are tried, nearest first, for the one whose row the file holds (a point the Ministry
+# has renumbered or paused has no row in the file for a while).
+WBGT_NEAREST_POINTS: Final = 3
 # The ministry's wording (terms page): the source sentence, and for edited content the editing sentence; the
 # sensor's value is a daily maximum computed here, so both are given. "XX Survey" is filled with the site's name.
 WBGT_ATTRIBUTION: Final = (
