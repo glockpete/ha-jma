@@ -75,7 +75,7 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
 </table>
 
 <p align="center">
-  <img src="docs/images/device.png" alt="The device page of the integration: the weather entity, thirteen sensors, the feed-problem sensor and the alerts event entity" width="85%">
+  <img src="docs/images/device.png" alt="The device page of the integration: the weather entity, fourteen sensors, the feed-problem sensor and the alerts event entity" width="85%">
   <br><sub>The device page shows every entity of one place. Taken from a Home Assistant 2026.9.4 test instance,
   with data from JMA's servers.</sub>
 </p>
@@ -479,7 +479,7 @@ A kind code that is not in this table is listed in the attribute with `level` se
 | Attribute | What it holds |
 |---|---|
 | `count` | The number of volcanoes that concern your place. The state is the highest level of all of them. |
-| `volcanoes` | The volcanoes, highest level first, then the nearest, at most 10 (`max_listed`). Each has `code`, `name_ja`, `name_en`, `level`, `level_system`, `warning_type` (`forecast`, `crater`, `residential` or `sea`), `kind_code`, `kind_ja`, `kind_en`, `condition` (JMA's 引上げ or 引下げ), `headline` (JMA's text for the bulletin, at most 300 characters), `report_time`, `relevance` (`municipality` or `distance`), `distance_km` and `jma_url` (the volcano's page on JMA's site). The list is excluded from the recorder. |
+| `volcanoes` | The volcanoes, highest level first, then the nearest, at most 10 (`max_listed`). Each has `code`, `name_ja`, `name_en`, `level`, `level_system`, `warning_type` (`forecast`, `crater`, `residential` or `sea`), `kind_code`, `kind_ja`, `kind_en`, `condition` (JMA's own word, one of 発表 announced, 継続 continued, 切替 switched, 引上げ raised, 引下げ lowered and 解除 cancelled), `headline` (JMA's text for the bulletin, at most 300 characters), `report_time`, `relevance` (`municipality` or `distance`), `distance_km` and `jma_url` (the volcano's page on JMA's site). The list is excluded from the recorder. |
 | `report_time` | The newest report time among the listed volcanoes. |
 | `radius_km` | The distance rule in use. |
 | `max_listed`, `unknown_codes` | The limit of the list, and the kind codes this release does not know. |
@@ -738,8 +738,8 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
 - **Volcanoes.** The sensor reads the bulletins JMA lists in `warning.json` (噴火警報・予報). It does not read the
   volcanic observation reports, ash-fall forecasts or the map of regulated areas. A volcano counts by the municipalities
   its bulletin names, or by distance when it names none. A bulletin that lists areas is
-  judged by them alone, even when none of them can match a municipality (JMA's list for 西之島 holds one code,
-  1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
+  judged by them alone, even when none of them can match a municipality (JMA's lists for 須美寿島 and
+  ベヨネース列岩 hold one code, 1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
   For a volcano without levels, the 0 to 5 number is this integration's placement of JMA's grade, not
   a JMA figure (see [Volcanoes](#volcanoes)). The 50 km default distance is this integration's choice too.
 - **The tsunami coast area (津波予報区) comes from JMA's list of the coastal municipalities of each of the 66 areas**

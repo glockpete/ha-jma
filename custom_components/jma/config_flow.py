@@ -319,7 +319,8 @@ class JmaOptionsFlow(OptionsFlow):
             vol.Required(CONF_STATION_PRIMARY, default=str(data[CONF_STATION_PRIMARY])): str,
             vol.Required(CONF_STATION_SECONDARY, default=str(data[CONF_STATION_SECONDARY])): str,
             # Optional with a suggested value, not a default: an options form that does not send it (a client that
-            # predates it) leaves the saved options as they were, and the default radius applies until one is set.
+            # predates it) is saved without it. async_create_entry(data=cleaned) replaces the saved options, so a
+            # radius saved earlier is dropped and the default radius applies until one is set again.
             vol.Optional(CONF_VOLCANO_RADIUS_KM, description={
                 "suggested_value": int(radius_km(data.get(CONF_VOLCANO_RADIUS_KM)))}):
                 NumberSelector(NumberSelectorConfig(
