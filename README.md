@@ -873,12 +873,13 @@ of the entities in the database of Home Assistant, which Home Assistant removes 
 
 ## Quality scale
 
-`manifest.json` declares the tier **platinum** of the
-[Home Assistant Integration Quality Scale](https://www.home-assistant.io/docs/quality_scale/), and
-`custom_components/jma/quality_scale.yaml` lists every rule of the scale with where it is met or why it does not
-apply (no account to re-authenticate, no device to discover). Home Assistant checks that file only for its own
-integrations, so `tests/test_quality_scale_file.py` checks it here: every rule once, no rule left to do, a reason on
-every exemption, and the tier the manifest claims earned.
+`manifest.json` declares the tier **custom**, which is the tier Home Assistant gives every integration outside
+core. The rules of the
+[Home Assistant Integration Quality Scale](https://www.home-assistant.io/docs/quality_scale/) are still followed:
+`custom_components/jma/quality_scale.yaml` lists every rule of the scale, bronze to platinum, with where it is met
+or why it does not apply (no account to re-authenticate, no device to discover). Home Assistant checks that file
+only for its own integrations, so `tests/test_quality_scale_file.py` checks it here: every rule once, no rule left
+to do and a reason on every exemption.
 
 ## Reporting problems and contributing
 

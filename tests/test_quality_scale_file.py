@@ -61,15 +61,10 @@ def test_every_rule_of_the_scale_is_listed_once_and_nothing_else():
     assert list(_rules()) == ALL_RULES  # same order as hassfest, so a diff against core reads easily
 
 
-def test_the_declared_tier_is_earned():
+def test_the_manifest_declares_the_custom_tier():
+    # Home Assistant gives the tier "custom" to every integration outside core; the rules are still all met below.
     with (COMPONENT / "manifest.json").open(encoding="utf-8") as f:
-        tier = json.load(f)["quality_scale"]
-    assert tier in TIERS
-    rules = _rules()
-    needed = [rule for level, names in TIERS.items() for rule in names
-              if list(TIERS).index(level) <= list(TIERS).index(tier)]
-    not_met = [rule for rule in needed if _status(rules[rule]) == "todo"]
-    assert not_met == []
+        assert json.load(f)["quality_scale"] == "custom"
 
 
 def test_nothing_is_left_as_todo():

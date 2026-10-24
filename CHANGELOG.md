@@ -16,6 +16,8 @@ and the project uses [semantic versioning](https://semver.org/).
 
 ### Changed
 
+- **Quality scale tier `custom`.** `manifest.json` now declares `custom`, the tier Home Assistant gives every
+  integration outside core, instead of `platinum`. `quality_scale.yaml` still lists all 54 rules met or exempt.
 - **Only releases are offered.** `hide_default_branch` in `hacs.json` removes the `main` branch from the version
   picker, so users only install a tested release.
 

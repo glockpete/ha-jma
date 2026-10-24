@@ -23,5 +23,5 @@ English: [README.md](README.md)
   ほかの地域（東京都の多摩・島しょを含む）は都道府県全体が対象です。
 - **地震・津波情報**は P2P地震情報 から受け取ります。**これだけを頼りに避難や安全の判断をしないでください。**
 - **削除**: エントリーを削除すると、台風・熱中症・津波の通知を覚えておくファイルも一緒に削除されます。ほかに残るファイルはありません（Home Assistant のデータベースにあるエンティティの履歴は、Home Assistant の通常の削除で消えます）。
-- **品質スケール**: Home Assistant の Integration Quality Scale の **platinum** を `manifest.json` で宣言しています。各ルールをどこで満たしているか（または当てはまらない理由）は `custom_components/jma/quality_scale.yaml` にあり、`tests/test_quality_scale_file.py` が確認します（Home Assistant 自身はこのファイルを公式の統合でしか検証しません）。
+- **品質スケール**: `manifest.json` では、Home Assistant がコア以外のすべての統合に割り当てる **custom** を宣言しています。Integration Quality Scale のルール（bronze〜platinum の全 54 項目）は引き続き守っており、各ルールをどこで満たしているか（または当てはまらない理由）は `custom_components/jma/quality_scale.yaml` にあり、`tests/test_quality_scale_file.py` が確認します（Home Assistant 自身はこのファイルを公式の統合でしか検証しません）。
 - **出典**: 各サービスの利用規約に従って表示してください。Open-Meteo の無料 API は非営利目的に限られます。

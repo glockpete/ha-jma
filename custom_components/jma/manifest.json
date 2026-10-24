@@ -13,7 +13,7 @@
   "loggers": [
     "custom_components.jma"
   ],
-  "quality_scale": "platinum",
+  "quality_scale": "custom",
   "requirements": [],
   "version": "0.7.0"
 }
