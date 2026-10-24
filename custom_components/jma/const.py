@@ -9,7 +9,7 @@ from datetime import timedelta
 from typing import Final
 
 DOMAIN: Final = "jma"
-VERSION: Final = "0.7.0"
+VERSION: Final = "0.8.0"
 # Names the product and its version only; some services reject the default Python user agent.
 USER_AGENT: Final = f"ha-jma/{VERSION}"
 # The most bytes of one HTTP answer that are read (after decompression). The largest file the integration

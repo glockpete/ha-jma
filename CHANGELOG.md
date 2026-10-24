@@ -3,7 +3,7 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
-## Unreleased
+## 0.8.0 - volcano, national tsunami coasts, national heat index
 
 ### Added
 
