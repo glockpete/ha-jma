@@ -399,8 +399,12 @@ KIKIKURU_FLOOD_PALETTE: Final[dict[tuple[int, int, int], int]] = {
 KIKIKURU_ELEMENTS: Final[dict[str, str]] = {"inund": "inund", "land": "land", "flood": "flood_mesh"}
 
 # ---- safety alerts ----
-# Tsunami (P2P 552). class10 code of the place (the area list's third level, which the config flow stores as
-# "class10") -> the 津波予報区 whose grade is "home". The office is too coarse: 130000 also holds the Izu and
+# Tsunami (P2P 552). The 津波予報区 whose grade is "home" comes first from JMA's list of the coastal municipalities
+# of each region (tsunami_coast_data.py, by the class20 code of the place). This table is what is left for the Tokyo
+# office, kept so that no Tokyo entry changes: class10 code of the place (the area list's third level, which the
+# config flow stores as "class10") -> the region. JMA's list names six of the 23 wards (and the island villages, and
+# no municipality of the Tokyo mainland); a ward that is not on it, or a town of the mainland, keeps the Tokyo Bay
+# grade it had before the list was used. The office is too coarse: 130000 also holds the Izu and
 # Ogasawara islands. Names as P2P writes them (live history 2026-10-03: 東京湾内湾 in the 2025-07-30 bulletins,
 # 伊豆諸島 and 小笠原諸島 in the 2025-07-30 / 2025-07-31 / 2026-06-08 ones). 130010 東京地方 (the 23 wards and the
 # mainland), 130020 伊豆諸島北部 and 130030 伊豆諸島南部 (both 伊豆諸島), 130040 小笠原諸島. Other prefectures: no entry.

@@ -7,6 +7,20 @@ and the project uses [semantic versioning](https://semver.org/).
 
 ### Added
 
+- **The tsunami coast area (津波予報区) for every coastal municipality in Japan.** `sensor.jma_<place>_tsunami` used
+  to know its coast area only for Tokyo; everywhere else it stayed `none`, although `max_grade` and the events
+  already covered the whole country. The sensor now follows the area JMA gives to the municipality in its own list,
+  "津波予報区に対応する沿岸の市町村対応表" (as of 26 March 2026): 685 class20 areas on 66 coast areas. An inland
+  municipality has no coast area and stays `none`. The table is `tsunami_coast_data.py`, made by
+  `scripts/build_tsunami_coast.py` from that JMA list (a PDF; the text of its table is saved in
+  `tests/fixtures/tsunami_shichouson_rows.json`) and the class20 codes of JMA's area list.
+  `scripts/check_tsunami_coast_gis.py` checks it against JMA's GIS data (the coast line of each area and the outline
+  of each municipality): 1,789 of the 1,805 class20 areas agree, and the 16 that differ are explained in the script.
+- **A municipality on two coasts.** 22 municipalities are on JMA's list under two coast areas (for example 横須賀市:
+  東京湾内湾 and 相模湾・三浦半島; 富津市; 下関市; 天草市). The sensor takes the stronger grade of the two, and the
+  height, arrival time and condition of that area. New attributes of the sensor and new keys of the `tsunami` event:
+  `home_areas` (the list of the coast areas of the place; `home_area` stays, with the names joined by ` / `) and
+  `home_area_in_force` (the area the grade comes from). `tsunami_cancelled` has `home_areas` too.
 - **Release asset.** Every published release carries `jma.zip`, the integration folder zipped by the new
   `release.yml` workflow. `hacs.json` names it (`zip_release`, `filename`), so HACS and the Home Assistant
   Marketplace fetch one file instead of every file of the folder, and count the downloads. The asset was added to
@@ -27,6 +41,8 @@ and the project uses [semantic versioning](https://semver.org/).
 
 ### Changed
 
+- **Tokyo keeps its coast area.** JMA's list names six of the 23 wards (and the island villages, and no town of the
+  Tokyo mainland). A place in Tokyo that is not on it keeps the Tokyo Bay grade it had, so no Tokyo entry changes.
 - **Quality scale tier `custom`.** `manifest.json` now declares `custom`, the tier Home Assistant gives every
   integration outside core, instead of `platinum`. `quality_scale.yaml` still lists all 54 rules met or exempt.
 - **Only releases are offered.** `hide_default_branch` in `hacs.json` removes the `main` branch from the version

@@ -23,6 +23,23 @@ ruff check .
 The Home Assistant version that `pytest-homeassistant-custom-component` pulls in decides which Python you need;
 `.github/workflows/tests.yml` shows the one that is used in CI.
 
+## The tsunami coast table
+
+`custom_components/jma/tsunami_coast_data.py` is generated: JMA's list of the coastal municipalities of each tsunami
+forecast area (津波予報区), by class20 code. Do not edit it by hand. When JMA publishes a new list, or the area list
+gets a new class20 code:
+
+```bash
+pip install pdfplumber pyshp numpy
+python scripts/build_tsunami_coast.py --fetch-rows tests/fixtures/tsunami_shichouson_rows.json   # saves the table of the PDF
+python scripts/build_tsunami_coast.py --write                                                  # makes the module (fetches area.json)
+python scripts/check_tsunami_coast_gis.py --area tests/fixtures/area.json                      # compares with JMA's GIS data
+```
+
+The script stops when a name of the PDF fits no class20 area, or fits several: add nothing to the table by hand,
+change the rule in `resolve_name` or say in the pull request what the PDF changed. `tests/test_tsunami_coast.py`
+makes the table again from the saved rows and `tests/fixtures/area.json` and fails if the module differs.
+
 ## Pull requests
 
 - Keep a change small and say what it fixes in the description.

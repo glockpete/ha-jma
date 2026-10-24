@@ -36,7 +36,6 @@ from .const import (
     CONF_VOLCANO_RADIUS_KM,
     DOMAIN,
     EVENT_TYPES,
-    TSUNAMI_COAST_AREA,
     URL_AMEDAS_TABLE,
 )
 from .coordinator import (
@@ -65,6 +64,7 @@ from .parse_amedas import station_names_from_table
 from .parse_quake import QuakePlace, prefecture_for_office
 from .parse_volcano import radius_km
 from .quake_ws import QuakeClient
+from .tsunami_coast import home_regions
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.BINARY_SENSOR, Platform.EVENT, Platform.SENSOR, Platform.WEATHER]
@@ -158,7 +158,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
         warnings=WarningsCoordinator(hass, entry, api, cfg, fire),
         nowcast=NowcastCoordinator(hass, entry, api, cfg, fire),
         quake=QuakeClient(hass, api, fire, on_quake, place, memory=memory.tsunami, save=memory.save,
-                          tsunami_area=TSUNAMI_COAST_AREA.get(cfg.class10)),
+                          tsunami_area=home_regions(cfg.area, cfg.class10)),
         # Optional data: no events, no pushes, not part of feed health. The typhoon, heat-alert and volcano
         # coordinators also raise events; the volcano feed is also part of feed health (binary_sensor.feed_conditions).
         timeline=WarningOutlookCoordinator(hass, entry, api, cfg),

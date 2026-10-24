@@ -562,10 +562,12 @@ class TsunamiSensor(_QuakeSocketSensor):
         bulletin = tracker.current
         picture = tracker.picture(dt_util.now())
         if bulletin is None or picture is None:
-            return {"home_area": tracker.home_area}
+            return {"home_area": tracker.home_area, "home_areas": list(tracker.home_areas)}
         entry = picture.home_area_entry
         return {
             "home_area": tracker.home_area,
+            "home_areas": list(tracker.home_areas),
+            "home_area_in_force": entry.name if entry else None,
             "max_grade": picture.max,
             "counts": picture.counts,
             "areas_major": picture.areas_major,

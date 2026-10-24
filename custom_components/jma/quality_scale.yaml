@@ -54,7 +54,7 @@ rules:
   docs-data-update: done  # README "Update intervals"
   docs-examples: done  # README "Example automations"
   docs-known-limitations: done  # README "Known limits"
-  docs-supported-devices: done  # README "Set up" and "Known limits": any municipality in JMA's table; WBGT and tsunami areas for Tokyo only
+  docs-supported-devices: done  # README "Set up" and "Known limits": any municipality in JMA's table; WBGT for Tokyo only; the tsunami coast area for every municipality on JMA's list of coastal municipalities
   docs-supported-functions: done  # README "Entities" and "Events"
   docs-troubleshooting: done  # README "Troubleshooting"
   docs-use-cases: done  # README "Features" and "Use it in automations"

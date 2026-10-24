@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import OrderedDict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -142,12 +142,20 @@ def parse_552(msg: Any) -> TsunamiBulletin | None:
     return TsunamiBulletin(bulletin_id, issued, cancelled, areas)
 
 
-def summarise(bulletin: TsunamiBulletin, home_area: str | None, now: datetime) -> TsunamiPicture:
+def _names(home: str | Sequence[str] | None) -> tuple[str, ...]:
+    """The 津波予報区 names of a place: one name, several, or none."""
+    return (home,) if isinstance(home, str) else tuple(home or ())
+
+
+def summarise(bulletin: TsunamiBulletin, home_areas: str | Sequence[str] | None, now: datetime) -> TsunamiPicture:
     if bulletin.cancelled:
         return TsunamiPicture("none", "none", None, _counts(()), [], [], False)
     if now - bulletin.issued > TSUNAMI_MAX_AGE:
         return TsunamiPicture("none", "none", None, _counts(()), [], [], True)
-    entry = next((a for a in bulletin.areas if home_area and a.name == home_area), None)
+    # A municipality on two coasts has two regions; the strongest grade of them is its grade (the first listed
+    # of equal ones).
+    names = _names(home_areas)
+    entry = max((a for a in bulletin.areas if a.name in names), key=lambda a: a.rank, default=None)
     top = max((a.rank for a in bulletin.areas), default=0)
     return TsunamiPicture(
         home=TSUNAMI_GRADE_KEY[entry.rank] if entry else "none",
@@ -185,8 +193,10 @@ def _rank(key: Any) -> int:
 class TsunamiTracker:
     """Turns bulletins into `tsunami` / `tsunami_cancelled` events; pure, `memory` is mutated."""
 
-    def __init__(self, home_area: str | None, memory: dict[str, Any]) -> None:
-        self.home_area = home_area
+    def __init__(self, home_area: str | Sequence[str] | None, memory: dict[str, Any]) -> None:
+        # The 津波予報区 of the place: one, or two or more for a municipality on two coasts, or none.
+        self.home_areas = _names(home_area)
+        self.home_area = " / ".join(self.home_areas) or None  # for display; the names joined
         self.memory = memory
         self.current: TsunamiBulletin | None = None
         self.replayed = False
@@ -200,7 +210,7 @@ class TsunamiTracker:
     def picture(self, now: datetime) -> TsunamiPicture | None:
         if self.current is None:
             return None
-        return summarise(self.current, self.home_area, now)
+        return summarise(self.current, self.home_areas, now)
 
     def _mark_seen(self, bulletin_id: str) -> None:
         self._seen[bulletin_id] = None
@@ -310,6 +320,7 @@ class TsunamiTracker:
             events.append({
                 "type": "tsunami_cancelled", "id": bulletin.id,
                 "issued": bulletin.issued.isoformat(), "home_area": self.home_area,
+                "home_areas": list(self.home_areas),
                 "previous_home_grade": prev_home, "previous_max_grade": prev_max,
                 "cancelled": bulletin.cancelled, "expired": picture.expired,
                 "backfill": backfill,
@@ -333,6 +344,8 @@ class TsunamiTracker:
             "id": bulletin.id,
             "issued": bulletin.issued.isoformat(),
             "home_area": self.home_area,
+            "home_areas": list(self.home_areas),
+            "home_area_in_force": entry.name if entry else None,
             "home_grade": p.home,
             "home_grade_ja": TSUNAMI_GRADE_JA.get(p.home),
             "home_immediate": entry.immediate if entry else None,

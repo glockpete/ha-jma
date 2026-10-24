@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -64,7 +64,7 @@ class QuakeClient:
         place: QuakePlace,
         memory: dict[str, Any] | None = None,
         save: Callable[[], None] | None = None,
-        tsunami_area: str | None = None,
+        tsunami_area: str | Sequence[str] | None = None,
     ) -> None:
         self._hass = hass
         self._api = api

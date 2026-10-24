@@ -489,7 +489,7 @@ A kind code that is not in this table is listed in the attribute with `level` se
 | Entity | What it shows |
 |---|---|
 | `sensor.jma_<place>_last_earthquake` | The origin time of the newest earthquake reported, with its intensity in your prefecture and at your municipality. The attributes are described in [Earthquake values](#earthquake-values). |
-| `sensor.jma_<place>_tsunami` | The tsunami grade for your coast area: `none`, `watch`, `warning` or `major_warning`. The attributes give the strongest grade anywhere in Japan, the areas under a warning, and, for your coast area, the expected height and arrival time. Only some places have a coast area (see [Known limits](#known-limits)). |
+| `sensor.jma_<place>_tsunami` | The tsunami grade for your coast area: `none`, `watch`, `warning` or `major_warning`. The attributes give the strongest grade anywhere in Japan, the areas under a warning, and, for your coast area, the expected height and arrival time. A municipality on the coast has a coast area; an inland one has none and stays `none` (see [Known limits](#known-limits)). For a municipality on two coasts, `home_areas` lists both and the grade is the stronger of the two. |
 
 **When the earthquake connection is down.** `sensor.jma_<place>_last_earthquake` and `sensor.jma_<place>_tsunami`
 get their data only from the P2P地震情報 connection. When that connection has been down for more than 10 minutes,
@@ -544,11 +544,16 @@ To enable one of them:
 
 | Event type | When it fires | Data |
 |---|---|---|
-| `tsunami` | The picture for your coast area changes, or a warning or major warning is in force anywhere in Japan. | `id`, `issued`, `home_grade`, `home_grade_ja`, `home_area`, `home_height`, `home_height_m`, `home_arrival`, `home_condition`, `home_immediate`, `max_grade`, `areas_major`, `areas_warning`, `count_major`, `count_warning`, `count_watch`, `previous_home_grade`, `previous_max_grade`, `backfill` |
-| `tsunami_cancelled` | The tsunami information that was announced is cancelled or has expired. | `id`, `issued`, `home_area`, `previous_home_grade`, `previous_max_grade`, `cancelled`, `expired`, `backfill` |
+| `tsunami` | The picture for your coast area changes, or a warning or major warning is in force anywhere in Japan. | `id`, `issued`, `home_grade`, `home_grade_ja`, `home_area`, `home_areas`, `home_area_in_force`, `home_height`, `home_height_m`, `home_arrival`, `home_condition`, `home_immediate`, `max_grade`, `areas_major`, `areas_warning`, `count_major`, `count_warning`, `count_watch`, `previous_home_grade`, `previous_max_grade`, `backfill` |
+| `tsunami_cancelled` | The tsunami information that was announced is cancelled or has expired. | `id`, `issued`, `home_area`, `home_areas`, `previous_home_grade`, `previous_max_grade`, `cancelled`, `expired`, `backfill` |
 
 `backfill` is `true` when the event comes from the tsunami list read on connect and the bulletin is more than
 10 minutes old. A bulletin that is never cancelled expires 48 hours after it was issued.
+
+`home_areas` is the list of the coast areas (津波予報区) of your municipality, and `home_area` is the same names
+joined with ` / `. Most municipalities have one. A few lie on two coasts (for example 横須賀市: 東京湾内湾 and
+相模湾・三浦半島) and have two. The grade and the height, arrival time and condition are those of the area with the
+strongest grade; `home_area_in_force` names that area (empty when none of your areas is in the bulletin).
 
 ### Typhoons and heat
 
@@ -737,10 +742,17 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
   For a volcano without levels, the 0 to 5 number is this integration's placement of JMA's grade, not
   a JMA figure (see [Volcanoes](#volcanoes)). The 50 km default distance is this integration's choice too.
-- **The tsunami coast area (津波予報区) is known only for Tokyo prefecture**, by municipality: 東京湾内湾 (inner
-  Tokyo Bay: the 23 wards and the mainland), 伊豆諸島 (the Izu islands) and 小笠原諸島 (the Ogasawara islands).
-  Everywhere else `sensor.jma_<place>_tsunami` stays `none`. Its `max_grade` attribute and the `tsunami` event
-  still report a warning or major warning anywhere in Japan, with the areas named.
+- **The tsunami coast area (津波予報区) comes from JMA's list of the coastal municipalities of each of the 66 areas**
+  ("津波予報区に対応する沿岸の市町村対応表", as of 26 March 2026), so it works for every municipality on that list in
+  Japan. A municipality that is not on the list is inland, or on a lake or bay without a coast line the list
+  names, and `sensor.jma_<place>_tsunami` stays `none` for it. Its `max_grade` attribute and the `tsunami` event
+  still report a warning or major warning anywhere in Japan, with the areas named. JMA notes that a tsunami can
+  run up to a municipality that does not face the sea, so `none` does not mean safe. For a municipality that
+  JMA lists under two areas, the sensor follows the stronger grade of the two: the list does not say which part
+  of the municipality you live in. One exception keeps the sensor as it was: in the 23 wards of Tokyo and the
+  Tokyo mainland, a place that is not on JMA's list (JMA names six wards and the island villages) still follows
+  東京湾内湾, as every Tokyo entry did before the list was used. The list changes when JMA changes the areas; it
+  is made by `scripts/build_tsunami_coast.py` (see [Contributing](CONTRIBUTING.md#the-tsunami-coast-table)).
 - **The heat index (WBGT) sensor exists only for the Tokyo office (`130000`)**, the only office whose file name
   the integration knows. For every other office the sensor is not created. The heat-stroke alert sensor works for
   every office.
@@ -810,6 +822,10 @@ Where a service states no rate limit, none is given here. The intervals in
 - **Licence:** Public Data License 1.0 (「公共データ利用規約（第1.0版）」), unless a page says otherwise. No
   commercial ban is stated. Some content is restricted by law (気象業務法, the Meteorological Service Act). The
   page states no request-rate limit.
+- **A table shipped with the integration:** the coast area of a municipality (`tsunami_coast_data.py`) is made
+  from 「津波予報区に対応する沿岸の市町村対応表」 (気象庁, as of 26 March 2026, <https://www.jma.go.jp/jma/kishou/know/jishin/joho/tsunami-yohoku/tsunami_shichouson.pdf>)
+  and the class20 codes of the area list. It is not fetched while the integration runs. The integration processed
+  the list (names turned into codes) and checked the result against JMA's GIS data (地理情報, <https://www.data.jma.go.jp/developer/gis.html>).
 
 ### Open-Meteo
 
@@ -914,8 +930,11 @@ Where a service states no rate limit, none is given here. The intervals in
   | No JMA entry has the debug option on. Switch on "Enable the jma.simulate test action" in the options of an entry. | `simulate_no_debug_entry` | `config_entry_id` was left empty and no loaded entry has the option on. Switch it on under **Configure**. |
 
 - **A repair issue appears.** See [Repair issues](#repair-issues).
-- **No heat-index sensor, or the tsunami sensor is always `none`.** This is expected outside Tokyo. The heat
-  index needs the Tokyo office, and the coast area needs a Tokyo municipality. See [Known limits](#known-limits).
+- **No heat-index sensor.** This is expected outside Tokyo: the heat index needs the Tokyo office. See
+  [Known limits](#known-limits).
+- **The tsunami sensor is always `none`.** That is the right state when no tsunami information is in force for your
+  coast area. Its `home_areas` attribute shows the coast areas of your municipality. If it is empty, your
+  municipality is not on JMA's list of coastal municipalities. See [Known limits](#known-limits).
 - **No earthquake values for a third place.** See [Known limits](#known-limits).
 - **Look in the log.** These lines come from the integration. Each is written once for an outage or a run of
   failed polls, not once per attempt. The attempts in between are written at debug level.
