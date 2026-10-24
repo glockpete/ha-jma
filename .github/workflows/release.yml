@@ -7,6 +7,8 @@ name: Release
 # would otherwise offer a version it can't download.
 # Run it by hand (workflow_dispatch, with the tag) to add the asset to an older release. That run only uploads:
 # it fails when the tag has no release, and it never creates or publishes one.
+# Both the upload and the draft step edit a release that is already published, so the repository must not turn on
+# immutable releases (a repository setting).
 
 on:
   release:
@@ -50,7 +52,8 @@ jobs:
           cd custom_components/jma
           zip -r ../../jma.zip . -x '*/__pycache__/*' '*.pyc'
           unzip -l ../../jma.zip
-      # gh release upload fails when the tag has no release, so a manual run can't create one
+      # gh release upload fails when the tag has no release, so a manual run can't create one. --clobber replaces
+      # the asset (new asset id), so a rerun on an old release resets that release's download count.
       - name: Upload the asset to the release
         run: gh release upload "$TAG" jma.zip --clobber
       - name: Put the release back to draft so HACS doesn't offer it without its asset
