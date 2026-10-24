@@ -88,6 +88,9 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
 - **Rain.** The heaviest rain expected at your home in the next hour (5-minute nowcast), the rain outlook for the
   hours after that, and the キキクル risk level (JMA's landslide, flood and inundation risk map).
 - **Map layers.** Frame lists for rain radar and other JMA map layers, for map cards on a dashboard.
+- **Dashboard card.** [JMA Weather Card (Unofficial)](https://github.com/glockpete/ha-jma-card) shows the forecast,
+  warnings, rain in the next hour, the radar loop, earthquakes, tsunami, typhoons and heat in one card. It is a
+  separate HACS download (category Dashboard).
 - **Typhoons.** Every active storm with its track, wind, pressure and distance, and an alert when one is forecast
   to come near your home.
 - **Earthquakes.** The strongest shindo (震度, the Japanese intensity scale) in your prefecture and in your
