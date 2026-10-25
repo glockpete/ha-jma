@@ -17,7 +17,7 @@ English: [README.md](README.md)
   接近通知、都道府県と市区町村の震度、緊急地震速報、津波情報、熱中症警戒アラート、噴火警戒レベル。
 - **ダッシュボードカード**: [JMA Weather Card (Unofficial)](https://github.com/glockpete/ha-jma-card) で、予報・警報・1時間以内の雨・雨雲レーダー・地震・津波・台風・暑さを1枚のカードに表示できます。HACS の別ダウンロード（カテゴリ：Dashboard）です。
 
-  <a href="https://github.com/glockpete/ha-jma-card"><img src="https://raw.githubusercontent.com/glockpete/ha-jma-card/main/docs/images/full-light.png" alt="千代田区の JMA Weather Card：雨雲レーダー、現在の天気、大雨注意報、1時間以内の雨、1時間ごとの予報、週間予報、最新の地震" width="85%"></a>
+  <a href="https://github.com/glockpete/ha-jma-card"><img src="https://raw.githubusercontent.com/glockpete/ha-jma-card/main/docs/images/compact-light.png" alt="JMA Weather Card（コンパクト表示）：現在の天気、大雨注意報、1時間以内の雨、雨雲レーダー" width="360"></a>
 - **火山**: `sensor.jma_<place>_volcano` は、気象庁の噴火警報・予報（`warning.json`）に載っている火山のうち、あなたの地点に関係するものの最高の噴火警戒レベル（1〜5。該当なしは0）を表します。関係する火山の決め方は、発表に対象市町村が書かれていればあなたの市町村がその中にあること、書かれていなければ Home Assistant の自宅からの距離がオプションの値（初期値50 km。0にすると距離による判定をしません）以内であることです。噴火警戒レベルのない火山は、気象庁の警報の区分（火口周辺危険・入山危険・居住地域厳重警戒・周辺海域警戒・活火山であることに留意）を、この統合が1〜4の数字に置き換えて表します。気象庁が定めた数字ではなく、正確な区分は属性の `kind_code` にあります。属性 `volcanoes` には、火山ごとの名前、レベル、見出し、発表時刻、気象庁のページへのリンクが最大10件入ります。`volcano_raised` と `volcano_lowered` のイベントは、関係する火山のレベルが変わったときに発生します（レベル0と1は同じ状態として扱います）。5分ごとに取得し、再起動しても同じレベルを重ねて通知しません。
 - **初期状態で無効のセンサー**: `radar_frames` と `japan` は、新しく追加した地点では無効になっています。使うときは、エンティティの設定で有効にしてください。`feed_problem` は診断用のエンティティです。
 - **修復（Repairs）**: 「設定 > 修復」に次の2つが表示されることがあります。地震情報に接続できないエントリー（P2P地震情報は IP アドレスごとに2接続まで）と、アメダス観測所の1つから観測が届かない場合です。原因がなくなると自動で消えます。
