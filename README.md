@@ -80,6 +80,17 @@ listed in [Data sources and attribution](#data-sources-and-attribution). You nee
   with data from JMA's servers.</sub>
 </p>
 
+<p align="center">
+  <a href="https://github.com/glockpete/ha-jma-card">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/glockpete/ha-jma-card/main/docs/images/full-dark.png">
+      <img src="https://raw.githubusercontent.com/glockpete/ha-jma-card/main/docs/images/full-light.png" alt="The JMA Weather Card for Chiyoda, Tokyo: rain radar map, current conditions, a heavy rain advisory, rain in the next hour, the hourly and 7-day forecasts, and the latest earthquake" width="85%">
+    </picture>
+  </a>
+  <br><sub>The companion dashboard card, <a href="https://github.com/glockpete/ha-jma-card">JMA Weather Card (Unofficial)</a>,
+  a separate HACS download (category Dashboard).</sub>
+</p>
+
 ## Features
 
 - **Weather.** Current conditions from JMA's AMeDAS weather stations and the rain nowcast, a daily forecast from
