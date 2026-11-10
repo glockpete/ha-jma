@@ -21,6 +21,7 @@ from .conftest import mock_jma, setup
 WARNINGS = "/warning/data/r8/"
 VOLCANO = URL_VOLCANO_WARNINGS.rsplit("/", 1)[-1]
 EMITTERS = ("warnings", "nowcast", "typhoon", "heat_alert", "volcano")
+ALERTS = "event.jma_chiyoda_alerts"
 
 
 def _hits(aioclient_mock, needle: str) -> int:
@@ -39,6 +40,10 @@ async def _disable_and_run(hass: HomeAssistant, aioclient_mock, entry, freezer, 
         reg.async_update_entity(item.entity_id, disabled_by=er.RegistryEntryDisabler.USER)
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
+    return await _polls_in_30_minutes(hass, aioclient_mock, freezer)
+
+
+async def _polls_in_30_minutes(hass: HomeAssistant, aioclient_mock, freezer) -> dict[str, int]:
     before = {needle: _hits(aioclient_mock, needle) for needle in (WARNINGS, VOLCANO)}
     for _ in range(30):
         freezer.tick(timedelta(minutes=1))
@@ -65,4 +70,18 @@ async def test_event_entity_disabled_too_lets_the_feeds_rest(
     tokyo: HomeAssistant, aioclient_mock, entry, freezer
 ) -> None:
     polls = await _disable_and_run(tokyo, aioclient_mock, entry, freezer, keep_event=False)
+    assert polls == {WARNINGS: 0, VOLCANO: 0}
+
+
+async def test_disabling_the_event_entity_later_lets_the_feeds_rest(
+    tokyo: HomeAssistant, aioclient_mock, entry, freezer
+) -> None:
+    """Home Assistant removes a disabled entity at once and does not reload the entry: the listeners go with it."""
+    await _disable_and_run(tokyo, aioclient_mock, entry, freezer, keep_event=True)
+    runtime = entry.runtime_data
+    er.async_get(tokyo).async_update_entity(ALERTS, disabled_by=er.RegistryEntryDisabler.USER)
+    await tokyo.async_block_till_done()
+    assert tokyo.states.get(ALERTS) is None
+    polls = await _polls_in_30_minutes(tokyo, aioclient_mock, freezer)
+    assert entry.runtime_data is runtime  # still the same coordinators: a listener left behind would keep them polled
     assert polls == {WARNINGS: 0, VOLCANO: 0}
