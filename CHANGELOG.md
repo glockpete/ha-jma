@@ -15,6 +15,19 @@ and the project uses [semantic versioning](https://semver.org/).
   entity is enabled. With the event entity disabled too, a feed without an enabled entity is not polled, as before.
   Earthquake, early-warning and tsunami events were not affected (they arrive on the socket).
 
+### Changed
+
+- **README.** The banner and the screenshots now show inside HACS (they use full addresses; HACS does not show
+  pictures with a relative path). The page has a quick start, follows the order install, set up, entities, events,
+  automations, limitations, troubleshooting, and gained: what a second place takes from the home of Home Assistant,
+  a table of the `jma.simulate` fields with an example, an earthquake automation with an intensity threshold, the
+  attributes of the heat-alert and tsunami sensors, how to turn on debug logging, and what each service can learn
+  about your place. "Known limits" is now "Known limitations". Corrected: which log lines a broken file writes,
+  what `change: new` means, the time format of the early-warning events, what is announced again after a restart or
+  reload, the feeds the feed-problem sensor watches, that a warning JMA gives no level number still has a number
+  on the warning-level sensor, that an unreadable rain nowcast starts the 60 dry minutes of `rain_arriving` again,
+  and that Hokkaido has eight forecast offices. `README.ja.md` says the same where it covered these points.
+
 ## 0.8.0 - volcano, national tsunami coasts, national heat index
 
 ### Added
