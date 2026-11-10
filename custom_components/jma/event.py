@@ -50,6 +50,15 @@ class JmaAlerts(JmaEntity, EventEntity):
         self.async_on_remove(
             async_dispatcher_connect(self.hass, signal_alert(self._entry_id), self._enqueue))
         self.async_on_remove(async_at_started(self.hass, self._on_started))
+        # A coordinator is polled only while something listens to it, and the alerts are decided inside the poll.
+        # The feeds that raise events are therefore polled for this entity, whichever sensors the user disabled.
+        rt = self.runtime
+        for feed in (rt.warnings, rt.nowcast, rt.typhoon, rt.heat_alert, rt.volcano):
+            self.async_on_remove(feed.async_add_listener(self._feed_polled))
+
+    @callback
+    def _feed_polled(self) -> None:
+        """Nothing to do: the events arrive through the dispatcher. Listening is what keeps the feed polled."""
 
     async def _on_started(self, _hass: HomeAssistant) -> None:
         self._started = True

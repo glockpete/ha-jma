@@ -3,6 +3,18 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Alerts no longer depend on which sensors are enabled.** Home Assistant polls a feed only while an entity listens
+  to it, and the warning, rain, typhoon, heat-alert and volcano events are decided inside the poll. With
+  `sensor.jma_<place>_warning_level` and the feed-problem sensor disabled, the warnings file was never asked for
+  again after setup and no warning event could fire; the same held for each of the other four feeds and its sensors.
+  `event.jma_<place>_alerts` now listens to those five feeds itself, so they are polled for as long as the event
+  entity is enabled. With the event entity disabled too, a feed without an enabled entity is not polled, as before.
+  Earthquake, early-warning and tsunami events were not affected (they arrive on the socket).
+
 ## 0.8.0 - volcano, national tsunami coasts, national heat index
 
 ### Added

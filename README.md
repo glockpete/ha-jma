@@ -531,6 +531,10 @@ To enable one of them:
 2. Select the settings (the cog), switch on **Enabled** and select **Update**.
 3. Home Assistant sets the entity up after a short delay.
 
+You can disable any sensor you do not use. The alerts do not depend on them: while
+`event.jma_<place>_alerts` is enabled, the warning, rain, typhoon, heat-alert and volcano feeds are still read. If
+you disable the event entity as well, a feed with no enabled entity is no longer read.
+
 ## Events
 
 `event.jma_<place>_alerts` fires the event types below. The event data is in the entity's attributes.
