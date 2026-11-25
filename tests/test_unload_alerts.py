@@ -237,6 +237,39 @@ async def test_an_unload_during_the_start_does_not_record_an_alert_nobody_receiv
     assert key not in hass_storage or hass_storage[key]["data"]["heat"] == []
 
 
+async def test_a_start_that_ends_while_the_entity_is_still_there_sends_the_alert_and_does_not_record_it(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer, hass_storage) -> None:
+    """The other order: the start ends after the memory is frozen and before the entity is removed. The entity sends
+    what it held, and the file still does not record it, so the reloaded entry decides it again and sends it once
+    more: a duplicate, never a loss (the module doc of memory.py)."""
+    hass = tokyo
+    hass.set_state(CoreState.starting)
+    await _loaded(hass, aioclient_mock, entry, freezer)
+    key = f"jma.{entry.entry_id}.alert_memory"
+    memory = entry.runtime_data.memory
+    seen, unsub = _watch(hass)
+    memory.heat.append("20260101")  # decided during the start ...
+    memory.save()
+    async_dispatcher_send(hass, signal_alert(entry.entry_id), "heat_alert", {})  # ... and held in the queue
+    assert seen == []
+    real_unload_platforms = hass.config_entries.async_unload_platforms
+
+    async def start_then_unload(config_entry, platforms) -> bool:
+        hass.set_state(CoreState.running)  # the memory is frozen by now, the entity is still there
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert seen == ["heat_alert"]  # sent by the entity that is about to be removed
+        return await real_unload_platforms(config_entry, platforms)
+
+    with patch.object(hass.config_entries, "async_unload_platforms", side_effect=start_then_unload):
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    await _after_the_delay(hass, freezer)
+    unsub()
+    assert seen == ["heat_alert"]
+    assert key not in hass_storage or hass_storage[key]["data"]["heat"] == []
+
+
 async def test_a_freeze_before_the_start_writes_nothing_when_the_start_ends(
         hass: HomeAssistant, freezer, hass_storage) -> None:
     hass.set_state(CoreState.starting)

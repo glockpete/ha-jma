@@ -32,7 +32,8 @@ and the project uses [semantic versioning](https://semver.org/).
   waiting in the event entity are now sent before it is removed, and nothing decided after that is recorded. Such an
   alert is sent after the reload, and one decided in the instant the entity is being removed can be sent twice. A
   reload while Home Assistant is still starting records nothing: the alerts found during the start were still
-  waiting, and the reloaded entry sends them.
+  waiting, and the reloaded entry sends them (a second time, if the start ended in the instant the event entity was
+  being removed).
 - **Warnings: a record with a null `dataTypeCode`.** Such a record made the next poll raise a `TypeError` and left the
   warnings feed failing until a restart. The file is now refused like any other changed file.
 - **Typhoon: a list nested thousands of levels deep.** A broken body of that kind made the typhoon sensor unavailable

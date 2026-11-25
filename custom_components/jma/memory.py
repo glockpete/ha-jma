@@ -21,7 +21,9 @@ nothing (not even a delayed write on this old Store that would land over the fil
 decided after the freeze is announced again by the next start; one that still reached the entity in the instant
 before it was removed is then sent twice, which is again the right way round (a duplicate, never a loss). An unload
 before Home Assistant has started writes nothing at all: the alerts noted during the start were still in the entity's
-queue. unfreeze() undoes the freeze when the unload failed and the entry stays loaded.
+queue. When the start ends in the instant between the freeze and the removal of the entity, the entity still sends
+what it held; that is not written either, so the reloaded entry sends it once more (a duplicate again). unfreeze()
+undoes the freeze when the unload failed and the entry stays loaded.
 """
 
 from __future__ import annotations
@@ -173,7 +175,8 @@ class AlertMemory:
     def freeze(self) -> None:
         """Start of an unload: what is written from now on is a copy of the data as it is now (see the module doc).
         Before Home Assistant has started nothing was delivered, and the queue that holds it goes with the entity:
-        what was noted for the start is then not written at all, also when the start ends during the unload."""
+        what was noted for the start is then not written at all, also when the start ends during the unload. (When it
+        ends while the entity is still there, the entity sends its queue and the reloaded entry sends it again.)"""
         self._frozen = copy.deepcopy(self.data)
         if not self._running:
             self._unsaved = False
