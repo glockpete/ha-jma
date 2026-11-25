@@ -13,10 +13,19 @@ found while Home Assistant is still starting wait in the event entity's queue un
 started. Until then save() only notes that there is something to write; the file is written once
 Home Assistant is running. If it stops before that, the next start finds the old file and
 announces the alert again, which is the right way round.
+
+The same holds at unload: once the event entity is being removed nothing decided from then on reaches an entity (a
+removed entity writes no state), yet a tracker would still change its section. freeze() therefore takes a copy of the
+data as it was handed over; from then on the flush and any pending delayed write use that copy, and save() writes
+nothing (not even a delayed write on this old Store that would land over the file of the reloaded entry). An alert
+decided after the freeze is announced again by the next start; one that still reached the entity in the instant
+before it was removed is then sent twice, which is again the right way round (a duplicate, never a loss). unfreeze()
+undoes it when the unload failed and the entry stays loaded.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 from typing import Any, TypedDict
 
@@ -81,8 +90,8 @@ def _clean_tsunami(value: Any) -> dict[str, Any]:
 
 
 def _clean_volcano(value: Any) -> dict[str, Any]:
-    """{volcano code: {"level": int 0-5, "kind_code", "name_ja", "name_en", "report_time", "absent": int}}; an entry
-    of another shape is dropped (one repeated or one missed event is the worst case of that, a poll that raises
+    """{volcano code: {"level": int 0-5, "kind_code", "name_ja", "name_en", "report_time", "relevance" ("municipality"
+    or "distance"; missing in an entry written by release 0.8.0), "absent": int}}; an entry of another shape is dropped (one repeated or one missed event is the worst case of that, a poll that raises
     forever the worst case of keeping it). Only scalars are kept, and `level` and `absent` are whole numbers."""
     out: dict[str, Any] = {}
     if not isinstance(value, dict):
@@ -112,6 +121,7 @@ class AlertMemory:
         # state is RUNNING (async_at_started), so that is the state that counts here too.
         self._running = hass.state is CoreState.running
         self._unsaved = False
+        self._frozen: MemoryData | None = None
 
     @property
     def typhoon(self) -> dict[str, Any]:
@@ -158,7 +168,20 @@ class AlertMemory:
         return async_at_started(self._hass, started)
 
     @callback
+    def freeze(self) -> None:
+        """Start of an unload: what is written from now on is a copy of the data as it is now (see the module doc)."""
+        self._frozen = copy.deepcopy(self.data)
+
+    @callback
+    def unfreeze(self) -> None:
+        """The unload failed and the entry stays loaded: the live data is written again."""
+        self._frozen = None
+        self.save()
+
+    @callback
     def save(self) -> None:
+        if self._frozen is not None:
+            return  # decided after the freeze: no entity can have received it, the next start announces it again
         self._unsaved = True
         if self._running:
             self._write()
@@ -168,14 +191,14 @@ class AlertMemory:
 
     def _data_to_save(self) -> MemoryData:
         self._unsaved = False
-        return self.data
+        return self._frozen if self._frozen is not None else self.data
 
     async def async_flush(self) -> None:
         """On unload: a reload inside the save delay must not forget an alert it just sent. Before
         Home Assistant runs nothing was delivered, so nothing is written."""
         if self._unsaved and self._running:
             self._unsaved = False
-            await self._store.async_save(self.data)
+            await self._store.async_save(self._frozen if self._frozen is not None else self.data)
 
     async def async_remove(self) -> None:
         await self._store.async_remove()

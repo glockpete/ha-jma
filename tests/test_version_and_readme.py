@@ -62,3 +62,19 @@ def test_troubleshooting_names_every_feed_the_feed_problem_sensor_watches():
     paragraph = " ".join(readme[start : readme.index("\n- **", start + 5)].split())  # one line
     missing = sorted(key for key in keys if _FEED_WORDS[key] not in paragraph)
     assert missing == [], missing
+
+
+def test_readme_says_which_fields_a_volcano_that_left_the_list_still_carries():
+    from custom_components.jma.parse_volcano import VolcanoTracker
+
+    tracker = VolcanoTracker({"315": {"level": 3, "name_ja": "Hakoneyama", "name_en": "Hakoneyama", "absent": 1}})
+    ((event_type, payload),) = tracker.update([])  # the second poll in a row without the volcano
+    assert event_type == "volcano_lowered"
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    row = next(line for line in readme.splitlines() if line.startswith("| `volcano_lowered` |"))
+    found = re.search(r"`new_level` is 0: (.+?) are still given, and (.+?) are `null`", row)
+    assert found, "the sentence about a volcano JMA no longer lists is gone"
+    given, null = (set(re.findall(r"`([a-z_]+)`", part)) for part in found.groups())
+    assert null == {key for key, value in payload.items() if value is None}
+    # `area` is added to every event by the coordinator; `new_level` opens the sentence
+    assert given | {"new_level"} == {key for key, value in payload.items() if value is not None} | {"area"}

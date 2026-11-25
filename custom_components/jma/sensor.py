@@ -268,7 +268,7 @@ class WbgtSensor(_CoordSensor[WbgtState]):
     """Today's (JST) highest forecast WBGT (暑さ指数) at the nearest 環境省 WBGT point, for every office.
 
     The point is the nearest of the office's prefecture file to the home of Home Assistant; when the file has no row
-    for it, the next nearest (up to three). Unknown, not unavailable, while there is no figure: out of season
+    for it, or a row without a figure, the next nearest (up to three). Unknown, not unavailable, while there is no figure: out of season
     (`season` false, nothing is requested), before the first file of the season, or when the file holds no figure for
     today. Unavailable only when the file cannot be fetched or read for longer than the other feeds are kept.
 

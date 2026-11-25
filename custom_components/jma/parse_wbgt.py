@@ -67,7 +67,8 @@ def _value(cell: str) -> float | None:
 
 
 def parse_wbgt(text: str | None, stations: tuple[str, ...], today: date) -> WbgtForecast | None:
-    """The first listed station present in the CSV; None when there is no usable data."""
+    """The first listed station whose row in the CSV holds a figure; None when there is no usable data. A row
+    without a single figure counts as no row, so the next listed station is tried."""
     if not text:
         return None
     rows = [[c.strip() for c in line.split(",")] for line in text.splitlines() if line.strip()]
@@ -78,7 +79,7 @@ def parse_wbgt(text: str | None, stations: tuple[str, ...], today: date) -> Wbgt
         slots = [_slot(label) for label in header[2:]]
     except ValueError:
         return None  # an HTML page or another format
-    by_station = {r[0]: r for r in rows[1:] if r}
+    by_station = {r[0]: r for r in rows[1:] if any(_value(cell) is not None for cell in r[2:2 + len(slots)])}
     row = next((by_station[s] for s in stations if s in by_station), None)
     if row is None:
         return None
@@ -88,8 +89,6 @@ def parse_wbgt(text: str | None, stations: tuple[str, ...], today: date) -> Wbgt
         series.append({"time": when.isoformat(), "wbgt": v})
         if day == today and v is not None:
             today_vals.append(v)
-    if all(s["wbgt"] is None for s in series):
-        return None
     issued = None
     if len(row) > 1 and row[1]:
         try:

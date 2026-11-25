@@ -7,12 +7,26 @@ and the project uses [semantic versioning](https://semver.org/).
 
 ### Fixed
 
-- **Volcano: a restart no longer sends a false `volcano_lowered`.** After a start of Home Assistant or a reload, while
-  JMA's volcano list could not be read, a remembered volcano whose bulletin names no municipality was counted as gone.
-  The sensor read 0, and after two polls a false `volcano_lowered` was sent, then a `volcano_raised` when the list
-  came back. Now the poll fails instead: the sensor is unavailable, nothing is forgotten and no event is sent. The
-  list is asked for again at every poll while there is none, and an answer without a row no longer replaces a list
-  already read.
+- **Volcano: a restart no longer sends a false `volcano_lowered`.** While JMA's volcano list could not be read (after
+  a start of Home Assistant or a reload), or had no coordinates for a volcano, a remembered volcano whose bulletin
+  names no municipality was counted as gone. It left the sensor, and after two polls a false `volcano_lowered` was
+  sent, then a `volcano_raised` when the list came back. Now the volcano is kept at its bulletin's level, without a
+  distance, until it can be placed. A level change in that time is still announced, and the other volcanoes are
+  reported as usual. The list is asked for again at every poll while there is none, and an answer without a row no
+  longer replaces a list already read.
+- **Volcano: a smaller distance option no longer sends `volcano_lowered`.** A volcano that counted by distance and
+  lies outside the distance after the option or Home Assistant's home was changed is forgotten without an event.
+  Before, it was announced as lowered to 0 after two polls although its level had not changed.
+- **Events: two alerts sent in a row no longer share one state.** While Home Assistant was running, alerts decided at
+  the same moment were written in the same millisecond. The state of the event entity is its fire time to the
+  millisecond, so it did not change for the second alert, and a state trigger that names `to`, `from`, `not_to` or
+  `not_from` did not fire for it. (The triggers in the README name none of them and fired.) The alerts are now
+  written 5 ms apart, as the ones held during a start of Home Assistant already were.
+- **Events: a reload no longer loses or misrecords an alert.** An alert decided while the integration was being
+  unloaded could be recorded as announced although the event entity was already gone, so it was never sent. A late
+  write of the old alert memory could also land over the file of the reloaded entry two seconds later. Alerts still
+  waiting in the event entity are now sent before it is removed, and nothing decided after that is recorded. Such an
+  alert is sent after the reload, and one decided in the instant the entity is being removed can be sent twice.
 - **Warnings: a record with a null `dataTypeCode`.** Such a record made the next poll raise a `TypeError` and left the
   warnings feed failing until a restart. The file is now refused like any other changed file.
 - **Typhoon: a list nested thousands of levels deep.** A broken body of that kind made the typhoon sensor unavailable
@@ -21,6 +35,8 @@ and the project uses [semantic versioning](https://semver.org/).
   was not created and the feed-problem sensor failed.
 - **Volcano: a bulletin whose kind code is implausibly long is left out**, so the recorded attribute `unknown_codes`
   cannot outgrow the recorder's limit.
+- **Heat index: a point whose row holds no figure** is passed over like a point without a row, and the next two
+  nearest are tried. Before, the sensor read `unknown` although a neighbouring point had figures.
 - **`eew_cancelled` no longer carries a `predicted_shindo` key.** It was always null and was not in the README.
 - **Release workflow:** a cancelled run puts the release back to draft too, as a failed one already did.
 - **README:** eight Hokkaido offices, not seven, read the `hokkaido` heat-index file. The troubleshooting text names
@@ -44,6 +60,8 @@ and the project uses [semantic versioning](https://semver.org/).
   `tests/fixtures/tsunami_shichouson_rows.json`) and the class20 codes of JMA's area list.
   `scripts/check_tsunami_coast_gis.py` checks it against JMA's GIS data (the coast line of each area and the outline
   of each municipality): 1,789 of the 1,805 class20 areas agree, and the 16 that differ are explained in the script.
+  If a tsunami bulletin is in force for such a coast while you upgrade from 0.7.0, the `tsunami` event is sent once
+  more, now with the grade of your own coast; a bulletin for a Tokyo coast is not announced again.
 - **A municipality on two coasts.** 22 municipalities are on JMA's list under two coast areas (for example 横須賀市:
   東京湾内湾 and 相模湾・三浦半島; 富津市; 下関市; 天草市). The sensor takes the stronger grade of the two, and the
   height, arrival time and condition of that area. New attributes of the sensor and new keys of the `tsunami` event:

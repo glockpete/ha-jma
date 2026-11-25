@@ -3,6 +3,9 @@
 Events are queued and fired a few milliseconds apart, and only once Home Assistant has
 started: an event entity's state is its fire time to the millisecond, and automations arm
 their triggers during startup, so an event fired earlier would be missed or would replace the stored state.
+The gap is kept against the last event written, whenever that was: Home Assistant runs the writing task at once, so
+two alerts sent in a row would otherwise share a millisecond, and a state that does not change is no trigger for an
+automation that names `to`, `from`, `not_to` or `not_from`.
 """
 
 from __future__ import annotations
@@ -39,6 +42,7 @@ class JmaAlerts(JmaEntity, EventEntity):
         self._queue: list[tuple[str, dict[str, Any]]] = []
         self._started = False
         self._flushing: asyncio.Task[None] | None = None
+        self._written_at: float | None = None  # the loop's time when the last event was written
 
     @property
     def available(self) -> bool:
@@ -50,6 +54,19 @@ class JmaAlerts(JmaEntity, EventEntity):
         self.async_on_remove(
             async_dispatcher_connect(self.hass, signal_alert(self._entry_id), self._enqueue))
         self.async_on_remove(async_at_started(self.hass, self._on_started))
+        # the unload of the entry waits for the queue before it removes this entity (__init__.py async_unload_entry)
+        extra = self.runtime.extra
+        extra["alerts_drain"] = self.async_drain
+        self.async_on_remove(lambda: extra.pop("alerts_drain", None))
+
+    async def async_drain(self) -> None:
+        """Wait until the events already queued have been written. Before Home Assistant has started the queue is
+        held on purpose (and its alerts are not marked announced either), so there is nothing to wait for."""
+        if not self._started:
+            return
+        self._kick()
+        while self._flushing is not None and not self._flushing.done():
+            await asyncio.wait([self._flushing])
 
     async def _on_started(self, _hass: HomeAssistant) -> None:
         self._started = True
@@ -71,8 +88,12 @@ class JmaAlerts(JmaEntity, EventEntity):
 
     async def _flush(self) -> None:
         while self._queue:
+            if self._written_at is not None:
+                # only an event that would otherwise share a millisecond with the one before it waits
+                wait = self._written_at + EVENT_SPACING - self.hass.loop.time()
+                if wait > 0:
+                    await asyncio.sleep(wait)
             event_type, data = self._queue.pop(0)
             self._trigger_event(event_type, data)
             self.async_write_ha_state()
-            if self._queue:  # only space events that would otherwise share a millisecond
-                await asyncio.sleep(EVENT_SPACING)
+            self._written_at = self.hass.loop.time()

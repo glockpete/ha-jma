@@ -17,7 +17,7 @@ from custom_components.jma.api import JmaApi
 from custom_components.jma.const import DOMAIN, URL_WBGT, WBGT_ATTRIBUTION
 from custom_components.jma.coordinator import JmaConfig, WbgtCoordinator, WbgtState
 from custom_components.jma.diagnostics import async_get_config_entry_diagnostics
-from custom_components.jma.parse_wbgt import nearest_points
+from custom_components.jma.parse_wbgt import nearest_points, parse_wbgt
 from custom_components.jma.sensor import WbgtSensor
 
 from .conftest import mock_jma, setup
@@ -121,6 +121,54 @@ async def test_when_the_nearest_point_has_no_row_the_next_nearest_is_read(tokyo:
     assert state.attributes["station"] == second.number != "62078"
     assert state.attributes["station_name"] == "生駒山" and state.attributes["station_km"] == second.km
     assert float(state.state) == 16.0  # 62081, highest of the first day's eight slots (160)
+
+
+def _without_figures(text: str, number: str, cell: str = "") -> str:
+    """The same file with the row of `number` kept (its key and issue time) and every figure of it replaced by `cell`,
+    a blank. SYNTHETIC: no captured file holds such a row."""
+    lines = text.splitlines()
+    out = [",".join([*line.split(",")[:2], *[cell] * (len(line.split(",")) - 2)]) if line.split(",")[0] == number
+           else line for line in lines]
+    assert out != lines  # the row was there and holds no figure now
+    return "\n".join(out) + "\n"
+
+
+@pytest.mark.parametrize("cell", ["", " ", "  "])
+def test_a_row_without_a_figure_counts_as_no_row_for_the_parser(cell: str) -> None:
+    text = _without_figures(load_text("wbgt_yohou_tokyo.csv"), "44132", cell)
+    numbers = {line.split(",")[0] for line in text.splitlines()}
+    assert {"44132", "44136"} <= numbers  # the row is still in the file
+    w = parse_wbgt(text, ("44132", "44136"), date(2026, 9, 28))
+    assert w is not None and w.station == "44136"
+    assert parse_wbgt(text, ("44132",), date(2026, 9, 28)) is None  # and with nothing else listed there is no data
+
+
+async def test_when_the_nearest_points_row_has_no_figure_the_next_nearest_is_read(
+    tokyo: HomeAssistant, aioclient_mock
+) -> None:
+    text = _without_figures(wbgt_on("wbgt_yohou_osaka.csv", FIRST_DAY), "62078")
+    second = nearest_points("osaka", *at("62078"))[1]
+    await _start(tokyo, aioclient_mock, _entry("270000", "2714000", "270000"), "osaka", text, at("62078"))
+    state = _wbgt_state(tokyo, "2714000")
+    assert state.attributes["station"] == second.number != "62078"
+    assert state.attributes["station_name"] == "生駒山" and state.attributes["station_km"] == second.km
+    assert float(state.state) == 16.0  # 62081, highest of the first day's eight slots (160)
+
+
+async def test_when_none_of_the_nearest_rows_has_a_figure_it_is_a_quiet_unknown(
+    tokyo: HomeAssistant, aioclient_mock, caplog
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="custom_components.jma")
+    text = wbgt_on("wbgt_yohou_osaka.csv", FIRST_DAY)
+    for point in nearest_points("osaka", *at("62078")):
+        text = _without_figures(text, point.number)
+    await _start(tokyo, aioclient_mock, _entry("270000", "2714000", "270000"), "osaka", text, at("62078"))
+    state = _wbgt_state(tokyo, "2714000")
+    assert state.state == "unknown"
+    assert state.attributes["season"] is True and state.attributes["station"] == "62078"  # the one asked for first
+    assert "series" not in state.attributes and "issued" not in state.attributes
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING and r.name.startswith("custom_components.jma")
+            and "wbgt" in r.getMessage().lower()] == []
 
 
 async def test_a_file_with_no_row_for_the_nearest_points_is_unknown_not_unavailable(

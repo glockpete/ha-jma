@@ -296,10 +296,20 @@ async def _reload(hass: HomeAssistant, entry: JmaConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: JmaConfigEntry) -> bool:
+    runtime = entry.runtime_data
+    # Order matters: events still queued must reach the event entity before it is removed (a removed entity writes no
+    # state), and the memory is frozen before the platforms go, because an alert decided after that reaches no entity
+    # and must not be written as announced (nor by a later delayed write of this Store over the reloaded entry's file).
+    drain = runtime.extra.get("alerts_drain")
+    if drain is not None:
+        await drain()
+    runtime.memory.freeze()
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded:
         # a reload inside the save delay must not forget an alert it has just sent
-        await entry.runtime_data.memory.async_flush()
+        await runtime.memory.async_flush()
+    else:
+        runtime.memory.unfreeze()
     return unloaded
 
 

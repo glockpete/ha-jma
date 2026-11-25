@@ -468,7 +468,8 @@ is installed. In the entity ids below, `<place>` is the lower-case English name 
 2. If the bulletin lists none, the volcano concerns you when it lies within the distance set under
    [Options](#options) of Home Assistant's home. The default is 50 km. This default is this integration's choice,
    not a JMA figure. The value 0 turns the distance rule off. A volcano with no coordinates in JMA's volcano list
-   cannot be placed and does not count.
+   cannot be placed and does not count, unless it already counted: it is then kept at the level of its bulletin,
+   without a distance, for as long as the list has no coordinates for it or until JMA no longer lists it.
 
 **What the number is.** For the volcanoes that have JMA's 噴火警戒レベル (levels 1 to 5) the number is the level. Some
 volcanoes have no levels. JMA gives them a grade, and JMA publishes no scale for these. The sensor puts them on the
@@ -490,7 +491,7 @@ A kind code that is not in this table is listed in the attribute with `level` se
 | Attribute | What it holds |
 |---|---|
 | `count` | The number of volcanoes that concern your place. The state is the highest level of all of them. |
-| `volcanoes` | The volcanoes, highest level first, then the nearest, at most 10 (`max_listed`). Each has `code`, `name_ja`, `name_en`, `level`, `level_system`, `warning_type` (`forecast`, `crater`, `residential` or `sea`), `kind_code`, `kind_ja`, `kind_en`, `condition` (JMA's own word, one of 発表 announced, 継続 continued, 切替 switched, 引上げ raised, 引下げ lowered and 解除 cancelled), `headline` (JMA's text for the bulletin, at most 300 characters), `report_time`, `relevance` (`municipality` or `distance`), `distance_km` and `jma_url` (the volcano's page on JMA's site). The list is excluded from the recorder. |
+| `volcanoes` | The volcanoes, highest level first, then the nearest, at most 10 (`max_listed`). Each has `code`, `name_ja`, `name_en`, `level`, `level_system`, `warning_type` (`forecast`, `crater`, `residential` or `sea`), `kind_code`, `kind_ja`, `kind_en`, `condition` (JMA's own word, one of 発表 announced, 継続 continued, 切替 switched, 引上げ raised, 引下げ lowered and 解除 cancelled), `headline` (JMA's text for the bulletin, at most 300 characters), `report_time`, `relevance` (`municipality` or `distance`), `distance_km` (`null` while the volcano's coordinates are not known) and `jma_url` (the volcano's page on JMA's site). The list is excluded from the recorder. |
 | `report_time` | The newest report time among the listed volcanoes. |
 | `radius_km` | The distance rule in use. |
 | `max_listed`, `unknown_codes` | The limit of the list, and the kind codes this release does not know. |
@@ -586,12 +587,15 @@ Typhoon approach stages:
 | Event type | When it fires | Data |
 |---|---|---|
 | `volcano_raised` | The level of a volcano that concerns your place (see [Volcanoes](#volcanoes)) goes up. This includes a volcano seen for the first time at level 2 or higher: `old_level` is then 0. | `volcano_code`, `name_ja`, `name_en`, `old_level`, `new_level`, `kind_code`, `kind_ja`, `kind_en`, `warning_type`, `level_system`, `condition`, `headline`, `report_time`, `distance_km`, `jma_url`, `area` |
-| `volcano_lowered` | The level of such a volcano goes down. When JMA no longer lists the volcano, `new_level` is 0 and the bulletin fields are `null`. | as above |
+| `volcano_lowered` | The level of such a volcano goes down. When JMA no longer lists the volcano, `new_level` is 0: `volcano_code`, `name_ja`, `name_en`, `old_level`, `jma_url` and `area` are still given, and `kind_code`, `kind_ja`, `kind_en`, `warning_type`, `level_system`, `condition`, `headline`, `report_time` and `distance_km` are `null`. | as above |
 
 Level 0 and level 1 count as one state for these events. JMA keeps a volcano at level 1 for a while after it lowers
 the level and then drops it from the list, which is not a change of activity, so neither step sends an event. A
-volcano that is missing from the list is announced as lowered to 0 only after two polls in a row without it, so one
-incomplete file from JMA's server does not send a "lowered" followed by a "raised". A bulletin that is older than the
+volcano that is missing from the list, or whose bulletin no longer concerns your place, is announced as lowered to 0
+only after two polls in a row without it, so one incomplete file from JMA's server does not send a "lowered" followed
+by a "raised". One case sends nothing: a volcano that counted by distance and lies outside the distance after the
+distance option or Home Assistant's home was changed is forgotten without an event. If it comes within the distance
+again at level 2 or higher, it is announced as `volcano_raised` with `old_level` 0. A bulletin that is older than the
 one the integration remembers is ignored. For a volcano that has no levels, the `old_level` and `new_level` are the
 numbers of the [table](#volcanoes), and `kind_code` says which grade it was.
 
@@ -751,10 +755,12 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   its bulletin names, or by distance when it names none. A bulletin that lists areas is
   judged by them alone, even when none of them can match a municipality (JMA's lists for 須美寿島 and
   ベヨネース列岩 hold one code, 1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
-  After a start of Home Assistant or a reload of the integration, until JMA's volcano list has been read once, a
-  volcano the integration remembers from before and whose bulletin names no municipality cannot be placed. The
-  volcano sensor is then `unavailable` until the list is read (it is asked for again at every poll, every 5
-  minutes): no `volcano_lowered` event is sent for that volcano, and no other volcano is reported during that time.
+  While they are not in hand (after a start of Home Assistant or a reload of the integration until the list has been
+  read once, or when the list has no coordinates for the volcano), a volcano the integration remembers from before
+  and whose bulletin names no municipality is kept at the level of its bulletin, with `distance_km` `null`. No
+  `volcano_lowered` event is sent for it, a level change in its bulletin is still announced, and the other volcanoes
+  are reported as usual. A volcano the integration does not remember and cannot place does not count until its
+  coordinates are read. While there is no list, it is asked for again at every poll (every 5 minutes).
   For a volcano without levels, the 0 to 5 number is this integration's placement of JMA's grade, not
   a JMA figure (see [Volcanoes](#volcanoes)). The 50 km default distance is this integration's choice too.
 - **The tsunami coast area (津波予報区) comes from JMA's list of the coastal municipalities of each of the 66 areas**
@@ -772,7 +778,8 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   prefecture (the first two digits of the office code: the eight Hokkaido offices read `hokkaido`, the Amami office
   reads `kagoshima`, the four Okinawa offices read `okinawa`) and takes the point nearest to the home of Home Assistant
   from the Ministry's list of points. A home just across a prefecture border is served by a point of the office's
-  prefecture, and `station_km` says how far it is. If the file has no row for that point it tries the next two nearest.
+  prefecture, and `station_km` says how far it is. If the file has no row for that point, or a row without a single
+  figure, it tries the next two nearest.
   The Ministry publishes the figures only in its season, from the fourth Wednesday of April for 26 weeks (22 April to
   21 October in 2026); outside it the sensor is `unknown` with `season` `false`, and a file that is not out yet on the
   first days is `unknown` too. The list of points is the Ministry's `wbgt_point_master-20260515.csv` (841 points in

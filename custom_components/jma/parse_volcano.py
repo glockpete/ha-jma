@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -228,14 +229,19 @@ def _effective(level: int) -> int:
 
 class VolcanoTracker:
     """volcano_raised / volcano_lowered decisions. Pure: `memory` is the "volcano" section of AlertMemory,
-    {volcano code: {"level", "kind_code", "name_ja", "name_en", "report_time", "absent"}}; it is changed in place
-    (every key is read defensively) and `dirty` tells the owner to save.
+    {volcano code: {"level", "kind_code", "name_ja", "name_en", "report_time", "relevance", "absent"}}; it is changed
+    in place (every key is read defensively; an entry written by release 0.8.0 has no "relevance") and `dirty` tells
+    the owner to save.
 
     An event is sent when a volcano's level changes between two steps of the scale 1 / 2 / 3 / 4 / 5, level 0 (no
     bulletin) counting as 1 (see _effective). Three guards keep a bad file from sending a pair of false events: a
     bulletin dated before the one remembered is ignored; a volcano with a kind code this release does not know is
     left as it was; a remembered volcano missing from the list is lowered to 0 only after VOLCANO_ABSENT_POLLS polls
-    in a row without it."""
+    in a row without it.
+
+    A remembered volcano whose bulletin is still in force but no longer concerns the place is judged by unreached():
+    it is held (listed as before) while its coordinates are not in hand, it is forgotten without an event when it
+    counted by distance (only the radius or the home can have changed), and it is otherwise counted as absent."""
 
     def __init__(self, memory: dict[str, Any]) -> None:
         self._memory = memory
@@ -254,10 +260,36 @@ class VolcanoTracker:
         if self._memory.pop(code, None) is not None:
             self.dirty = True
 
-    def update(self, volcanoes: list[dict[str, Any]]) -> list[tuple[str, dict[str, Any]]]:
-        """`volcanoes`: the entries of volcano_entry() that concern the place, all of them."""
+    def unreached(self, warning: VolcanoWarning, info: VolcanoInfo | None, radius: float) -> str | None:
+        """What to do with a bulletin of warning.json that relevance() did not place: "keep" (list it as held, with
+        why "distance" and no km), "drop" (forget the volcano, no event) or None (the absent count decides).
+
+        Only a remembered volcano whose bulletin names no municipality is kept or dropped: it is held while the
+        distance rule is on and its coordinates are not in hand (no volcano list, or no usable row for it), and
+        dropped when it counted by distance, since then only the radius or the home can have changed."""
+        old = self._entry(warning.code)
+        if not old or warning.areas:
+            return None
+        if radius > 0 and (info is None or info.lat is None or info.lon is None):
+            return "keep"
+        if old.get("relevance") == "distance":
+            return "drop"
+        return None
+
+    def remembered_info(self, code: str) -> VolcanoInfo:
+        """The remembered names of a held volcano that the volcano list has no row for (no coordinates), so that a
+        hold does not overwrite them with None."""
+        old = self._entry(code)
+        return VolcanoInfo(code, _str(old.get("name_ja")), _str(old.get("name_en")), None, None)
+
+    def update(self, volcanoes: list[dict[str, Any]], dropped: Iterable[str] = ()) -> list[tuple[str, dict[str, Any]]]:
+        """`volcanoes`: the entries of volcano_entry() that concern the place, all of them, a held one included (why
+        "distance" with `distance_km` None; it keeps the relevance remembered). `dropped`: the codes that unreached()
+        dropped, forgotten at once without an event."""
         events: list[tuple[str, dict[str, Any]]] = []
         present: set[str] = set()
+        for code in dropped:
+            self._forget(code)
         for volcano in volcanoes:
             code = str(volcano["code"])
             present.add(code)
@@ -273,10 +305,16 @@ class VolcanoTracker:
             if _effective(level) != _effective(before):
                 kind = "volcano_raised" if _effective(level) > _effective(before) else "volcano_lowered"
                 events.append((kind, self._payload(volcano, before, level)))
-            self._put(code, {
+            entry: dict[str, Any] = {
                 "level": level, "kind_code": volcano.get("kind_code"), "name_ja": volcano.get("name_ja"),
                 "name_en": volcano.get("name_en"), "report_time": volcano.get("report_time"), "absent": 0,
-            })
+            }
+            held = volcano.get("relevance") == "distance" and volcano.get("distance_km") is None
+            if not held:
+                entry["relevance"] = volcano.get("relevance")
+            elif "relevance" in old:
+                entry["relevance"] = old["relevance"]  # a hold keeps what was remembered (none in a 0.8.0 entry)
+            self._put(code, entry)
         for code in [k for k in self._memory if k not in present]:
             old = self._entry(code)
             absent = _count(old.get("absent")) + 1

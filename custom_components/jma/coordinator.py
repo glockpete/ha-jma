@@ -622,7 +622,7 @@ class TyphoonCoordinator(AlertEmitter, _JmaCoordinator[TyphoonState]):
 
 @dataclass(frozen=True)
 class WbgtState:
-    """forecast: None out of season, on a 404, for an empty file or one without a row for the points.
+    """forecast: None out of season, on a 404, for an empty file or one without a usable row for the points.
     season: today (JST) is inside the Ministry's season. points: the nearest points of the office's prefecture file
     to the entry's place, nearest first (empty when the office has no file), whatever the file held."""
 
@@ -797,9 +797,13 @@ class VolcanoCoordinator(AlertEmitter, _JmaCoordinator[VolcanoState]):
 
     warning.json is the only file read every poll. The headline of a volcano comes from its own bulletin
     (warning/{code}.json), asked for once per report time; the names and coordinates come from volcano_list.json, asked
-    for once a day and kept when a request fails. No volcano in the list is a good poll (level 0). Without the list the
-    poll fails, last good data kept, when a remembered volcano's bulletin names no municipality (the distance rule
-    cannot place it); with nothing remembered it goes on and the municipality decides.
+    for once a day and kept when a request fails. No volcano in the list is a good poll (level 0), and a missing list
+    never fails a poll. A remembered volcano whose bulletin names no municipality is held while the distance rule is
+    on and its coordinates are not in hand (no list, or no usable row for it): listed at its bulletin's level, why
+    "distance" and no km, with the list's names or the remembered ones, until it can be placed or its bulletin leaves
+    warning.json. A volcano that counted by distance and no longer does (the radius or the home changed) is forgotten
+    without an event; any other remembered volcano that no longer concerns the place is counted as absent (see
+    VolcanoTracker.unreached).
     volcano_raised / volcano_lowered events; `memory` is the "volcano" section of AlertMemory (see
     parse_volcano.VolcanoTracker), `save` persists it.
     """
@@ -819,8 +823,8 @@ class VolcanoCoordinator(AlertEmitter, _JmaCoordinator[VolcanoState]):
 
     async def _load_volcano_list(self, now: datetime) -> None:
         """Names and coordinates, once a day. They are optional: a failure or an answer without a row keeps the last
-        list (or none) and the poll goes on, except where _fetch needs the coordinates; while there is no list it is
-        asked for at every poll."""
+        list (or none) and the poll goes on (a remembered volcano that needs the coordinates is held); while there is
+        no list it is asked for at every poll."""
         if self._volcanoes_at is not None and now - self._volcanoes_at < INTERVAL_VOLCANO_LIST:
             return
         try:
@@ -851,17 +855,20 @@ class VolcanoCoordinator(AlertEmitter, _JmaCoordinator[VolcanoState]):
         now = dt_util.utcnow()
         warnings = parse_volcano_warnings(await self.api.get_json(URL_VOLCANO_WARNINGS))
         await self._load_volcano_list(now)
-        if not self._volcanoes and self.cfg.volcano_radius_km > 0:
-            # Without the list the distance rule cannot place a bulletin that names no municipality: the volcano would
-            # count as absent and be lowered by mistake. Fail the poll (last good data kept, memory untouched).
-            unplaced = sorted(w.code for w in warnings if not w.areas and w.code in self._memory)
-            if unplaced:
-                raise JmaFetchError(f"volcano list unavailable: cannot place volcano {', '.join(unplaced)}")
-        home = (self.cfg.latitude, self.cfg.longitude)
+        home, radius = (self.cfg.latitude, self.cfg.longitude), self.cfg.volcano_radius_km
         found: list[tuple[VolcanoWarning, VolcanoInfo | None, str, float | None]] = []
+        dropped: list[str] = []
         for warning in warnings:
             info = self._volcanoes.get(warning.code)
-            why = relevance(warning, info, self.cfg.area, home, self.cfg.volcano_radius_km)
+            why = relevance(warning, info, self.cfg.area, home, radius)
+            if why is None:
+                # a remembered volcano that cannot be placed now is held; one that counted by distance and no longer
+                # does is forgotten without an event (only the radius or the home can have changed)
+                unreached = self._tracker.unreached(warning, info, radius)
+                if unreached == "keep":
+                    why, info = ("distance", None), info or self._tracker.remembered_info(warning.code)
+                elif unreached == "drop":
+                    dropped.append(warning.code)
             if why is not None:
                 found.append((warning, info, why[0], why[1]))
         # highest level first, then the nearest, then by code: the same order every poll
@@ -879,7 +886,7 @@ class VolcanoCoordinator(AlertEmitter, _JmaCoordinator[VolcanoState]):
                 self._warned_kinds.add(kind)
                 _LOGGER.warning("volcano: kind code %s is not known to this release (not counted in the level)", kind)
         # The events are decided last: nothing after this can raise and throw the queued events away.
-        for event_type, data in self._tracker.update(volcanoes):
+        for event_type, data in self._tracker.update(volcanoes, dropped):
             self._emit(event_type, {**data, "area": self.cfg.area_name})
         if self._tracker.dirty:
             self._tracker.dirty = False

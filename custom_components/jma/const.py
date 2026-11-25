@@ -81,8 +81,8 @@ WBGT_PREF_FILE: Final[dict[str, str]] = {
     "37": "kagawa", "38": "ehime", "39": "kochi", "40": "fukuoka", "41": "saga", "42": "nagasaki",
     "43": "kumamoto", "44": "oita", "45": "miyazaki", "46": "kagoshima", "47": "okinawa",
 }
-# How many of the nearest points are tried, nearest first, for the one whose row the file holds (a point the Ministry
-# has renumbered or paused has no row in the file for a while).
+# How many of the nearest points are tried, nearest first, for the one whose row in the file holds a figure (a point
+# the Ministry has renumbered or paused has no row in the file for a while; a row without a figure counts as no row).
 WBGT_NEAREST_POINTS: Final = 3
 # The ministry's wording (terms page): the source sentence, and for edited content the editing sentence; the
 # sensor's value is a daily maximum computed here, so both are given. "XX Survey" is filled with the site's name.
