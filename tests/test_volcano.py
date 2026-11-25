@@ -555,6 +555,42 @@ async def test_the_sensor_goes_unavailable_when_the_list_cannot_be_read_at_all(
     assert tokyo.states.get("sensor.jma_chiyoda_warning_level").state == "0"  # the other feeds go on
 
 
+async def test_a_restart_without_the_volcano_list_leaves_the_sensor_unavailable_until_the_list_is_read(
+        tokyo: HomeAssistant, aioclient_mock, hass_storage, freezer) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, title=TITLE, unique_id=AREA, data=ENTRY_DATA,
+                            options={"volcano_radius_km": 500})
+    bulletin = _synthetic("326", "315", "箱根山", [])  # 84 km from the tests' home, names no municipality
+    (warning,) = parse_volcano_warnings([bulletin])
+    level = VOLCANO_KINDS[warning.kind_code][0]
+    assert level >= 2
+    # remembered from before the restart, as the first run stored it
+    hass_storage[f"jma.{entry.entry_id}.alert_memory"] = _stored(entry, {"volcano": {"315": {
+        "level": level, "kind_code": warning.kind_code, "name_ja": "箱根山", "name_en": "Hakoneyama",
+        "report_time": warning.report_time, "absent": 0}}})
+
+    def feeds() -> None:
+        aioclient_mock.get(URL_VOLCANO_WARNINGS, json=[bulletin])  # registered before mock_jma, so it answers
+        aioclient_mock.get(URL_VOLCANO_WARNING.format(code="315"), status=404)
+
+    aioclient_mock.get(URL_VOLCANO_LIST, status=503)
+    feeds()
+    mock_jma(aioclient_mock)
+    await setup(tokyo, entry)
+    assert tokyo.states.get(SENSOR).state == "unavailable"
+    assert tokyo.states.get("sensor.jma_chiyoda_warning_level").state == "0"  # the other feeds go on
+    assert entry.runtime_data.memory.volcano["315"]["level"] == level  # nothing forgotten
+
+    # the list answers at the next poll: the level is back and nothing was announced
+    aioclient_mock.clear_requests()
+    feeds()
+    mock_jma(aioclient_mock)
+    freezer.tick(INTERVAL_VOLCANO)
+    await entry.runtime_data.volcano.async_refresh()
+    await tokyo.async_block_till_done()
+    assert tokyo.states.get(SENSOR).state == str(level)
+    assert tokyo.states.get(EVENT).attributes.get("event_type") not in ("volcano_raised", "volcano_lowered")
+
+
 # ---------- events, through the real wiring ----------
 
 async def test_a_volcano_already_at_a_level_is_announced_once_with_the_bulletin(
