@@ -190,7 +190,8 @@ class AlertMemory:
     @callback
     def save(self) -> None:
         if self._frozen is not None:
-            return  # decided after the freeze: no entity can have received it, the next start announces it again
+            # after the freeze nothing is recorded: the next start announces it (again, if the entity still got it)
+            return
         self._unsaved = True
         if self._running:
             self._write()
