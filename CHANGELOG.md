@@ -45,7 +45,8 @@ and the project uses [semantic versioning](https://semver.org/).
 - **Heat index: a point whose row holds no figure** is passed over like a point without a row, and the next two
   nearest are tried. Before, the sensor read `unknown` although a neighbouring point had figures.
 - **`eew_cancelled` no longer carries a `predicted_shindo` key.** It was always null and was not in the README.
-- **Release workflow:** a cancelled run puts the release back to draft too, as a failed one already did.
+- **Release workflow:** a cancelled run puts the release back to draft too, as a failed one already did. A second
+  job does it when the run is cancelled before the first job has run a step, where no step of that job can.
 - **README:** eight Hokkaido offices, not seven, read the `hokkaido` heat-index file. The troubleshooting text names
   the volcano warnings among the feeds the feed-problem sensor watches.
 

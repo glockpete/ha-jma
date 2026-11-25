@@ -99,6 +99,14 @@ def test_the_release_workflow_attaches_the_asset_hacs_json_names():
     last = workflow["jobs"]["asset"]["steps"][-1]
     assert last["if"] == "(failure() || cancelled()) && github.event_name == 'release'"
     assert last["run"] == 'gh release edit "$TAG" --draft=true'
+    # a run cancelled before that job has run a step runs none of its steps, so a second job does the same whenever
+    # the first did not succeed: always() keeps it through the cancellation, and a run by hand never drafts a release
+    draft = workflow["jobs"]["draft"]
+    assert draft["needs"] == "asset"
+    assert draft["if"] == "always() && github.event_name == 'release' && needs.asset.result != 'success'"
+    assert draft["permissions"] == {"contents": "write"}
+    assert draft["env"]["TAG"] == "${{ github.event.release.tag_name }}"
+    assert [step["run"] for step in draft["steps"]] == ['gh release edit "$TAG" --draft=true']
 
 
 def test_the_name_says_it_is_unofficial_in_every_place_a_user_sees_it():
