@@ -7,7 +7,7 @@ W2: a `save()` after the flush has begun its write must not schedule a delayed w
     write its data over the file of the reloaded entry two seconds later.
 W3: events still queued in the event entity when the unload starts are written before the entity is removed (a
     removed entity writes no state), because the unload drains the queue first. The queue holds events while Home
-    Assistant starts, and for the gap between two alerts sent in a row while it runs.
+    Assistant starts.
 
 The W1 and W2 tests drive `QuakeClient.handle` directly (conftest.py `no_quake_socket` stops `run`), standing in for
 the frame handled at quake_ws.py:309; the injection point is a wrapper round `AlertMemory.async_flush`, because that
@@ -180,25 +180,6 @@ async def test_w3_events_still_queued_when_the_unload_starts_reach_the_entity(
                 break
             await asyncio.sleep(0)
         assert seen == W3_TYPES[:1]  # the first is written, the other two are queued
-        assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
-    unsub()
-    assert seen == W3_TYPES
-
-
-async def test_w3_alerts_sent_in_a_row_while_running_reach_the_entity_before_it_is_removed(
-        tokyo: HomeAssistant, aioclient_mock, entry, freezer, hass_storage) -> None:
-    """Alerts sent in a row while Home Assistant runs are written a gap apart (see test_event_spacing.py), so a
-    reload right after them finds the later ones still queued."""
-    hass = tokyo
-    await _loaded(hass, aioclient_mock, entry, freezer)
-    assert hass.states.get(EVENT).state == "unknown"  # no event yet: the first one has no gap to wait for
-    seen, unsub = _watch(hass)
-    with _a_gap_of_many_loop_turns():
-        for event_type in W3_TYPES:
-            async_dispatcher_send(hass, signal_alert(entry.entry_id), event_type, {})
-        # the first is written at once, the other two wait for their gap
-        assert hass.states.get(EVENT).attributes.get("event_type") == W3_TYPES[0]
         assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     unsub()

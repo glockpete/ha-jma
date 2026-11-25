@@ -21,11 +21,6 @@ and the project uses [semantic versioning](https://semver.org/).
 - **Volcano: "two polls in a row" is counted exactly.** A poll that listed the volcano with a kind code this release
   does not know did not start the count again, so a `volcano_lowered` could follow two polls without the volcano
   that were not in a row.
-- **Events: two alerts sent in a row no longer share one state.** While Home Assistant was running, alerts decided at
-  the same moment were written in the same millisecond. The state of the event entity is its fire time to the
-  millisecond, so it did not change for the second alert, and a state trigger that names `to`, `from`, `not_to` or
-  `not_from` did not fire for it. (The triggers in the README name none of them and fired.) The alerts are now
-  written 5 ms apart, as the ones held during a start of Home Assistant already were.
 - **Events: a reload no longer loses or misrecords an alert.** An alert decided while the integration was being
   unloaded could be recorded as announced although the event entity was already gone, so it was never sent. A late
   write of the old alert memory could also land over the file of the reloaded entry two seconds later. Alerts still

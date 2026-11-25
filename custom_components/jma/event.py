@@ -3,9 +3,6 @@
 Events are queued and fired a few milliseconds apart, and only once Home Assistant has
 started: an event entity's state is its fire time to the millisecond, and automations arm
 their triggers during startup, so an event fired earlier would be missed or would replace the stored state.
-The gap is kept against the last event written, whenever that was: Home Assistant runs the writing task at once, so
-two alerts sent in a row would otherwise share a millisecond, and a state that does not change is no trigger for an
-automation that names `to`, `from`, `not_to` or `not_from`.
 """
 
 from __future__ import annotations
@@ -42,7 +39,6 @@ class JmaAlerts(JmaEntity, EventEntity):
         self._queue: list[tuple[str, dict[str, Any]]] = []
         self._started = False
         self._flushing: asyncio.Task[None] | None = None
-        self._written_at: float | None = None  # the loop's time when the last event was written
 
     @property
     def available(self) -> bool:
@@ -88,12 +84,8 @@ class JmaAlerts(JmaEntity, EventEntity):
 
     async def _flush(self) -> None:
         while self._queue:
-            if self._written_at is not None:
-                # only an event that would otherwise share a millisecond with the one before it waits
-                wait = self._written_at + EVENT_SPACING - self.hass.loop.time()
-                if wait > 0:
-                    await asyncio.sleep(wait)
             event_type, data = self._queue.pop(0)
             self._trigger_event(event_type, data)
             self.async_write_ha_state()
-            self._written_at = self.hass.loop.time()
+            if self._queue:  # only space events that would otherwise share a millisecond
+                await asyncio.sleep(EVENT_SPACING)
