@@ -489,6 +489,8 @@ def test_the_client_builds_the_eew_tracker_with_the_entrys_area() -> None:
     assert rec.events[0][1]["area"] == AREA_23 and rec.events[0][1]["predicted_shindo"] == "5+"
     client.handle(dict(_eew([], 3), cancelled=True), NOW)
     assert rec.kinds() == ["eew", "eew_cancelled"] and rec.events[1][1]["area"] == AREA_23
+    # the cancelled event carries exactly the tracker's keys: no predicted_scale, so no predicted_shindo either
+    assert "predicted_shindo" not in rec.events[1][1] and "predicted_scale" not in rec.events[1][1]
     other, rec_o = _client(_hachioji())
     other.handle(_eew([_area("東京", "東京都多摩東部", 45, 50)], 1), NOW)
     assert rec_o.kinds() == ["eew"] and rec_o.events[0][1]["area"] is None

@@ -15,6 +15,7 @@ from datetime import date, datetime
 from typing import Any
 
 from .errors import JmaParseError
+from .parse_typhoon import _when  # the typhoon parser's time rule: a time without an offset is JST
 from .telops import TELOPS
 
 HA_CONDITIONS = frozenset({
@@ -132,11 +133,19 @@ def _max_or_none(values: list[int | None]) -> int | None:
     return max(present) if present else None
 
 
+def _report_time(value: Any) -> datetime:
+    """The report time as an aware datetime: JMA sends +09:00, a time without an offset is read as JST."""
+    when = _when(value)
+    if when is None:
+        raise ValueError(f"unreadable report time {value!r}")
+    return when
+
+
 def parse_forecast(data: Any, class10: str, station: str) -> ForecastData:
     """Parse the forecast list into days (today first) and the 6-hour rain chances."""
     try:
         short = data[0]
-        report_time = datetime.fromisoformat(short["reportDatetime"])
+        report_time = _report_time(short["reportDatetime"])
         issue_hour = report_time.strftime("%H")
         ts_weather, ts_pops, ts_temps = short["timeSeries"][:3]
 
@@ -250,6 +259,6 @@ def parse_overview(data: Any) -> tuple[str, datetime]:
         text = "\n".join(
             line.strip("　 ") for line in str(data["text"]).split("\n")
         ).strip()
-        return text, datetime.fromisoformat(data["reportDatetime"])
+        return text, _report_time(data["reportDatetime"])
     except (KeyError, TypeError, ValueError) as err:
         raise JmaParseError(f"overview: {err!r}") from err

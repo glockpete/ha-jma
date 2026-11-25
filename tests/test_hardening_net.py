@@ -22,13 +22,13 @@ from homeassistant.util import dt as dt_util
 
 import custom_components.jma.api as api_module
 from custom_components.jma.api import JmaApi
-from custom_components.jma.const import EEW_FUTURE_TOLERANCE_S, HTTP_MAX_BODY_BYTES, URL_P2P_HISTORY
-from custom_components.jma.errors import JmaError
+from custom_components.jma.const import EEW_FUTURE_TOLERANCE_S, HTTP_MAX_BODY_BYTES, URL_P2P_HISTORY, URL_TYPHOON_TARGET
+from custom_components.jma.errors import JmaError, JmaParseError
 from custom_components.jma.parse_quake import ALERTED_MAX, EewTracker, parse_551
 from custom_components.jma.parse_tsunami import TsunamiTracker, parse_552
 from custom_components.jma.quake_ws import LOG_INTERVAL_S, QuakeClient
 
-from .conftest import QUAKE_PLACE
+from .conftest import QUAKE_PLACE, mock_jma, setup
 from .helpers import FIXTURES, clone, load_json
 from .test_tsunami import HOME, NS, REAL_RUN, _eew_frame, _FrameSocket, _warning_bulletin, _yield_loop
 
@@ -259,6 +259,23 @@ async def test_n5a_deeply_nested_json_is_a_jma_error_not_a_recursion_error(hass,
     aioclient_mock.get(URL_P2P_HISTORY, text="[" * 200000)
     with pytest.raises(JmaError):
         await JmaApi(async_get_clientsession(hass)).get_json(URL_P2P_HISTORY)
+
+
+async def test_n5a_a_deeply_nested_typhoon_list_keeps_the_last_good_data(tokyo, aioclient_mock, entry):
+    # TyphoonCoordinator reads targetTc.json with get_bytes + json.loads, not get_json: it needs the same treatment
+    mock_jma(aioclient_mock)
+    await setup(tokyo, entry)
+    co = entry.runtime_data.typhoon
+    good = co.data
+    assert co.last_update_success is True and good.count == 1
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(URL_TYPHOON_TARGET, content=b"[" * 200000)  # 200 KB, under HTTP_MAX_BODY_BYTES
+    await co.async_refresh()
+
+    assert not isinstance(co.last_exception, RecursionError), repr(co.last_exception)
+    assert co.last_update_success is True and co.data is good
+    assert co.last_error_type is JmaParseError
 
 
 def test_n5b_the_cap_is_far_above_the_largest_file_the_tests_know():

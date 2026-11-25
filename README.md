@@ -751,6 +751,10 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   its bulletin names, or by distance when it names none. A bulletin that lists areas is
   judged by them alone, even when none of them can match a municipality (JMA's lists for 須美寿島 and
   ベヨネース列岩 hold one code, 1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
+  After a start of Home Assistant or a reload of the integration, until JMA's volcano list has been read once, a
+  volcano the integration remembers from before and whose bulletin names no municipality cannot be placed. The
+  volcano sensor is then `unavailable` until the list is read (it is asked for again at every poll, every 5
+  minutes): no `volcano_lowered` event is sent for that volcano, and no other volcano is reported during that time.
   For a volcano without levels, the 0 to 5 number is this integration's placement of JMA's grade, not
   a JMA figure (see [Volcanoes](#volcanoes)). The 50 km default distance is this integration's choice too.
 - **The tsunami coast area (津波予報区) comes from JMA's list of the coastal municipalities of each of the 66 areas**
@@ -765,7 +769,7 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   東京湾内湾, as every Tokyo entry did before the list was used. The list changes when JMA changes the areas; it
   is made by `scripts/build_tsunami_coast.py` (see [Contributing](CONTRIBUTING.md#the-tsunami-coast-table)).
 - **The heat index (WBGT) point is the nearest one inside your office's prefecture.** The sensor reads the file of the
-  prefecture (the first two digits of the office code: the seven Hokkaido offices read `hokkaido`, the Amami office
+  prefecture (the first two digits of the office code: the eight Hokkaido offices read `hokkaido`, the Amami office
   reads `kagoshima`, the four Okinawa offices read `okinawa`) and takes the point nearest to the home of Home Assistant
   from the Ministry's list of points. A home just across a prefecture border is served by a point of the office's
   prefecture, and `station_km` says how far it is. If the file has no row for that point it tries the next two nearest.
@@ -922,9 +926,10 @@ Where a service states no rate limit, none is given here. The intervals in
   error messages, where the x and y numbers of a map tile are replaced too. The office code stays.
 - **Check the feed-problem sensor.** `binary_sensor.jma_<place>_feed_problem` watches the main feeds: warnings
   (with the XML cross-check), AMeDAS observations (and each of the two stations), the hourly forecast, the rain
-  nowcast, the daily forecast and the earthquake connection. Each feed's attribute shows `problem`, `since` and
-  `reason`. The other feeds (outlook, typhoons, heat, map layers, nationwide forecast) are optional and are not
-  watched. The limits are in [How the feed-problem sensor judges a feed](#how-the-feed-problem-sensor-judges-a-feed).
+  nowcast, the daily forecast, the volcano warnings and the earthquake connection. Each feed's attribute shows
+  `problem`, `since` and `reason`. The other feeds (outlook, typhoons, heat, map layers, nationwide forecast) are
+  optional and are not watched. The limits are in
+  [How the feed-problem sensor judges a feed](#how-the-feed-problem-sensor-judges-a-feed).
   The error text inside a `reason` is cut to 200 characters (the last character is `…`), so a server's whole error
   page does not fill the attribute.
 - **Turn on debug logging.** Add `custom_components.jma: debug` under `logger:` in `configuration.yaml` to see the

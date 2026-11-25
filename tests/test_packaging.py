@@ -94,9 +94,10 @@ def test_the_release_workflow_attaches_the_asset_hacs_json_names():
     # upload, not create: a manual run with a tag that has no release must fail, not publish one
     upload = next(step for step in workflow["jobs"]["asset"]["steps"] if step.get("name", "").startswith("Upload"))
     assert upload["run"] == f'gh release upload "$TAG" {filename} --clobber'
-    # the release is public before the job runs, so a failed job must hide it again
+    # the release is public before the job runs, so a failed or cancelled job must hide it again
+    # (failure() is false for a cancelled run)
     last = workflow["jobs"]["asset"]["steps"][-1]
-    assert last["if"] == "failure() && github.event_name == 'release'"
+    assert last["if"] == "(failure() || cancelled()) && github.event_name == 'release'"
     assert last["run"] == 'gh release edit "$TAG" --draft=true'
 
 

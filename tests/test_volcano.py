@@ -43,6 +43,7 @@ from custom_components.jma.errors import JmaParseError
 from custom_components.jma.memory import _clean_volcano, empty_memory
 from custom_components.jma.parse_typhoon import haversine_km
 from custom_components.jma.parse_volcano import (
+    KIND_CODE_MAX_LENGTH,
     VolcanoInfo,
     VolcanoTracker,
     VolcanoWarning,
@@ -193,6 +194,16 @@ def test_a_bulletin_that_cannot_be_read_is_left_out_and_the_others_stay() -> Non
     data.append({"eventId": "604", "reportDatetime": "2026-10-01T00:00:00+09:00",
                  "volcanoInfos": [{"type": "噴火警報・予報（対象火山）", "items": "x"}]})
     assert len(parse_volcano_warnings(data)) == 14
+
+
+def test_a_kind_code_longer_than_a_real_one_makes_the_bulletin_unreadable() -> None:
+    # the kind codes are recorded as an attribute (unknown_codes): a code of any length would swell it
+    data = [_set_kind(_record("503"), "9" * KIND_CODE_MAX_LENGTH, "x"),
+            _set_kind(_record("506"), "9" * (KIND_CODE_MAX_LENGTH + 1), "x"),
+            _set_kind(_record("113"), "9" * 5000, "x")]
+    assert [w.code for w in parse_volcano_warnings([*data, _record("326")])] == ["503", "326"]
+    with pytest.raises(JmaParseError, match="none of the 2"):
+        parse_volcano_warnings(data[1:])
 
 
 def test_a_bulletin_without_municipalities_or_names_is_still_read() -> None:
@@ -706,6 +717,97 @@ async def test_without_a_volcano_list_the_names_come_from_the_bulletin_and_the_m
     co2 = _coordinator(tokyo, entry, None, {}, None)
     await co2.async_refresh()
     assert co2.data.volcanoes[0]["name_en"] is None and co2.last_update_success is True
+
+
+async def test_a_remembered_volcano_decided_by_distance_is_not_lowered_while_the_list_is_missing_after_a_restart(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:
+    def feeds() -> None:
+        mock_volcano(aioclient_mock, warnings=[_synthetic("326", "315", "箱根山", [])])
+        aioclient_mock.get(URL_VOLCANO_WARNING.format(code="315"), status=404)
+
+    memory: dict = {}
+    # first run: the list is readable, volcano 315 (84 km away, radius 500) is announced and remembered
+    feeds()
+    first: list = []
+    co = _coordinator(tokyo, entry, lambda t, d: first.append((t, d)), memory, None, volcano_radius_km=500.0)
+    co.set_alerts_ready()
+    await co.async_refresh()
+    assert co.data.level >= 2 and memory["315"]["level"] >= 2
+    assert [t for t, _ in first] == ["volcano_raised"]
+    remembered = clone(memory)
+
+    # restart: a new coordinator (the volcano list lives in memory only) with the stored memory; the list is down,
+    # warning.json still lists volcano 315 with the same bulletin that names no municipality
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(URL_VOLCANO_LIST, status=503)  # registered first, so it answers
+    feeds()
+    fired: list = []
+    co2 = _coordinator(tokyo, entry, lambda t, d: fired.append((t, d)), memory, None, volcano_radius_km=500.0)
+    co2.set_alerts_ready()
+    for _ in range(3):  # more than VOLCANO_ABSENT_POLLS
+        await co2.async_refresh()
+        freezer.tick(INTERVAL_VOLCANO)
+    assert fired == [] and memory == remembered  # nothing announced, nothing forgotten, the count not advanced
+    assert co2.last_update_success is False and "315" in str(co2.last_error)
+    assert len(_requested(aioclient_mock, "volcano_list.json")) == 3  # asked for again at every poll
+
+    # the list answers: the level is back, and neither a lowering nor a second raising was announced
+    aioclient_mock.clear_requests()
+    feeds()
+    await co2.async_refresh()
+    assert co2.last_update_success is True and co2.data.level >= 2
+    assert [v["code"] for v in co2.data.volcanoes] == ["315"] and fired == [] and memory == remembered
+
+
+async def test_an_empty_volcano_list_is_asked_for_again_at_the_next_poll(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:
+    aioclient_mock.get(URL_VOLCANO_LIST, json=[])  # answered, but without a row; registered first, so it answers
+    mock_volcano(aioclient_mock, warnings=_name("503"))
+    co = _coordinator(tokyo, entry, None, {}, None)
+    for _ in range(2):
+        await co.async_refresh()
+        freezer.tick(INTERVAL_VOLCANO)
+    assert co.last_update_success is True and co.data.volcanoes[0]["name_en"] is None
+    assert len(_requested(aioclient_mock, "volcano_list.json")) == 2
+
+
+async def test_an_answer_without_a_row_does_not_replace_a_volcano_list_already_read(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer) -> None:
+    def feeds() -> None:
+        mock_volcano(aioclient_mock, warnings=[_synthetic("326", "315", "箱根山", [])])
+        aioclient_mock.get(URL_VOLCANO_WARNING.format(code="315"), status=404)
+
+    feeds()
+    fired: list = []
+    co = _coordinator(tokyo, entry, lambda t, d: fired.append((t, d)), {}, None, volcano_radius_km=500.0)
+    co.set_alerts_ready()
+    await co.async_refresh()
+    assert [(v["code"], v["name_en"]) for v in co.data.volcanoes] == [("315", "Hakoneyama")]
+    assert [t for t, _ in fired] == ["volcano_raised"]
+
+    # a day later the list answers 200 without a row: the names and coordinates in hand still serve, so the volcano
+    # decided by distance stays placed (no failed poll, no false lowering)
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(URL_VOLCANO_LIST, json=[])  # registered first, so it answers
+    feeds()
+    for _ in range(3):  # more than VOLCANO_ABSENT_POLLS
+        freezer.tick(INTERVAL_VOLCANO_LIST)
+        await co.async_refresh()
+        assert co.last_update_success is True, co.last_error
+    assert [(v["code"], v["name_en"]) for v in co.data.volcanoes] == [("315", "Hakoneyama")]
+    assert [t for t, _ in fired] == ["volcano_raised"]
+    assert len(_requested(aioclient_mock, "volcano_list.json")) == 3  # once a day, as after any failed refresh
+
+
+async def test_a_missing_volcano_list_does_not_stop_the_poll_when_the_distance_rule_is_off(
+        tokyo: HomeAssistant, aioclient_mock, entry) -> None:
+    # radius 0: the distance rule is off, so a missing list cannot hide a volcano that concerns the place
+    aioclient_mock.get(URL_VOLCANO_LIST, status=503)
+    mock_volcano(aioclient_mock, warnings=[_synthetic("326", "315", "箱根山", [])])
+    memory = {"315": {"level": 2, "kind_code": "12", "report_time": "2026-10-01T10:00:00+09:00", "absent": 0}}
+    co = _coordinator(tokyo, entry, None, memory, None, volcano_radius_km=0.0)
+    await co.async_refresh()
+    assert co.last_update_success is True and co.data.volcanoes == []
 
 
 async def test_a_headline_is_asked_for_once_per_report_and_a_failed_request_is_tried_again(

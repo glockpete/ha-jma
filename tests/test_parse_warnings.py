@@ -10,6 +10,7 @@ from custom_components.jma.parse_warnings import (
     diff_warnings,
     parse_area_warnings,
     stale_bulletins,
+    suspect_reason,
     warning_names,
 )
 
@@ -147,3 +148,21 @@ def test_headline_comes_from_the_warnings_own_bulletin():
     area = parse_area_warnings(records, AREA)
     (w,) = (w for w in area.warnings if w.phenomenon == "rain")
     assert area.headlines[w.data_type] == "千代田区に大雨警報"
+
+
+@pytest.mark.parametrize("bad", [None, 7, "", ["VPWW54"]])
+def test_a_record_without_a_text_data_type_code_is_a_changed_file(bad):
+    """A null or non-text dataTypeCode would become a control_times key that the next poll's suspect_reason
+    cannot sort or join (a bare TypeError the coordinator never recovers from): refuse the file instead."""
+    records = clone(load_json("warning_r8_130000.json"))
+    records[1]["dataTypeCode"] = bad
+    with pytest.raises(JmaParseError, match="dataTypeCode"):
+        parse_area_warnings(records, AREA)
+
+
+def test_control_times_only_hold_text_keys_and_a_second_poll_compares_cleanly():
+    records = clone(load_json("warning_r8_130000.json"))
+    first = parse_area_warnings(records, AREA)
+    assert first.control_times and all(isinstance(k, str) for k in first.control_times)
+    second = parse_area_warnings(clone(records), AREA)
+    assert suspect_reason(dict(first.control_times), second) is None

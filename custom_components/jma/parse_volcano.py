@@ -34,6 +34,9 @@ from .parse_typhoon import _position, _when, haversine_km  # the typhoon parser'
 SECTION_VOLCANO = "噴火警報・予報（対象火山）"
 # A volcano code is three digits (JMA's own page reads it with (\d{3})); it goes into a URL, so nothing else is let in.
 _CODE = re.compile(r"[0-9]{3}")
+# A kind code (the `code` of a bulletin's own item) is two characters in every file seen; it is recorded as an
+# attribute when this release does not know it, so a longer one makes the bulletin unreadable.
+KIND_CODE_MAX_LENGTH = 4
 _MUNICIPALITY_DIGITS = 5  # JIS X 0401: prefecture (2) + municipality (3); the last two digits of a class20 code split it
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -78,7 +81,7 @@ def _record(rec: Any) -> VolcanoWarning | None:
     items = section.get("items") if section else None
     item = next((i for i in items if isinstance(i, dict) and _str(i.get("code"))), None) \
         if isinstance(items, list) else None
-    if item is None:
+    if item is None or len(item["code"]) > KIND_CODE_MAX_LENGTH:
         return None
     named = item.get("areas")
     first = named[0] if isinstance(named, list) and named else None

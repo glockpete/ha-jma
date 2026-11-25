@@ -124,6 +124,8 @@ def parse_area_warnings(records: Any, area: str) -> AreaWarnings:
     try:
         for record in records:
             dtc = record["dataTypeCode"]
+            if not isinstance(dtc, str) or not dtc:
+                raise JmaParseError(f"r8 warnings: dataTypeCode {dtc!r} is not a non-empty string")
             control_times[dtc] = record["controlDatetime"]
             report = record.get("reportDatetime")
             if report and (latest_report is None or report > latest_report):

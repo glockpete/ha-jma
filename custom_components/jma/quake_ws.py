@@ -163,7 +163,8 @@ class QuakeClient:
         elif code == 556:
             for event in self._eew.feed(msg, now, backfill=backfill):
                 event_type = event.pop("type")
-                event["predicted_shindo"] = SHINDO.get(event.get("predicted_scale") or 0)
+                if "predicted_scale" in event:  # the cancelled payload has none: it keeps exactly the tracker's keys
+                    event["predicted_shindo"] = SHINDO.get(event["predicted_scale"] or 0)
                 self._fire(event_type, event)
         elif code == 552:
             self._tsunami_events(self.tsunami.feed(msg, now, backfill=backfill), now)

@@ -3,6 +3,34 @@
 All notable changes are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project uses [semantic versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- **Volcano: a restart no longer sends a false `volcano_lowered`.** After a start of Home Assistant or a reload, while
+  JMA's volcano list could not be read, a remembered volcano whose bulletin names no municipality was counted as gone.
+  The sensor read 0, and after two polls a false `volcano_lowered` was sent, then a `volcano_raised` when the list
+  came back. Now the poll fails instead: the sensor is unavailable, nothing is forgotten and no event is sent. The
+  list is asked for again at every poll while there is none, and an answer without a row no longer replaces a list
+  already read.
+- **Warnings: a record with a null `dataTypeCode`.** Such a record made the next poll raise a `TypeError` and left the
+  warnings feed failing until a restart. The file is now refused like any other changed file.
+- **Typhoon: a list nested thousands of levels deep.** A broken body of that kind made the typhoon sensor unavailable
+  at once, with an "Unexpected error" in the log, instead of keeping the last good data.
+- **Forecast: a report time without a time-zone offset** is read as Japan time. Before, the nationwide forecast sensor
+  was not created and the feed-problem sensor failed.
+- **Volcano: a bulletin whose kind code is implausibly long is left out**, so the recorded attribute `unknown_codes`
+  cannot outgrow the recorder's limit.
+- **`eew_cancelled` no longer carries a `predicted_shindo` key.** It was always null and was not in the README.
+- **Release workflow:** a cancelled run puts the release back to draft too, as a failed one already did.
+- **README:** eight Hokkaido offices, not seven, read the `hokkaido` heat-index file. The troubleshooting text names
+  the volcano warnings among the feeds the feed-problem sensor watches.
+
+### Changed
+
+- The checks run on actions/setup-python 7.1.0, the hassfest action of 26 October 2026,
+  pytest-homeassistant-custom-component 0.13.375 (Home Assistant 2026.10.4) and mypy 2.4.1.
+
 ## 0.8.0 - volcano, national tsunami coasts, national heat index
 
 ### Added

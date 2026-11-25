@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -117,3 +117,38 @@ def test_overview():
     assert when.isoformat() == "2026-09-26T10:37:00+09:00"
     with pytest.raises(JmaParseError):
         parse_overview({})
+
+
+JST = timezone(timedelta(hours=9))
+
+
+def _without_offset(data):
+    """The saved report times with their "+09:00" removed (a feed that sends no offset)."""
+    out = clone(data)
+    for record in out if isinstance(out, list) else [out]:
+        record["reportDatetime"] = record["reportDatetime"].removesuffix("+09:00")
+    return out
+
+
+def test_a_forecast_report_time_without_an_offset_is_read_as_japan_time():
+    saved = load_json("forecast_130000.json")
+    plain = parse_forecast(_without_offset(saved), CLASS10, STATION)
+    assert plain.report_time.utcoffset() == timedelta(hours=9)
+    assert plain.report_time == datetime(2026, 9, 26, 11, 0, tzinfo=JST)
+    assert plain.issue_hour == "11"
+    assert plain.report_time == parse_forecast(saved, CLASS10, STATION).report_time  # the same instant as before
+
+
+def test_an_overview_report_time_without_an_offset_is_read_as_japan_time():
+    saved = load_json("overview_130000.json")
+    _, plain = parse_overview(_without_offset(saved))
+    assert plain.isoformat() == "2026-09-26T10:37:00+09:00"
+    assert plain == parse_overview(saved)[1]
+
+
+def test_an_unreadable_report_time_is_still_a_parse_error():
+    data = clone(load_json("overview_130000.json"))
+    for bad in ("yesterday", None):
+        data["reportDatetime"] = bad
+        with pytest.raises(JmaParseError):
+            parse_overview(data)
