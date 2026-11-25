@@ -866,7 +866,7 @@ class VolcanoCoordinator(AlertEmitter, _JmaCoordinator[VolcanoState]):
                 # does is forgotten without an event (only the radius or the home can have changed)
                 unreached = self._tracker.unreached(warning, info, radius)
                 if unreached == "keep":
-                    why, info = ("distance", None), info or self._tracker.remembered_info(warning.code)
+                    why, info = ("distance", None), self._tracker.remembered_info(warning.code, info)
                 elif unreached == "drop":
                     dropped.append(warning.code)
             if why is not None:

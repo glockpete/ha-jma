@@ -26,9 +26,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-from homeassistant.core import CoreState, Event, EventStateChangedData, HomeAssistant
+from homeassistant.core import CoreState, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -134,6 +135,7 @@ def _watch(hass: HomeAssistant) -> tuple[list[str], Callable[[], None]]:
     assert len(W3_TYPES) == 3
     seen: list[str] = []
 
+    @callback  # in the event loop: a plain function would run in a worker thread, some time later
     def on_change(event: Event[EventStateChangedData]) -> None:
         new = event.data["new_state"]
         if new is not None and new.attributes.get("event_type") in W3_TYPES:
@@ -195,11 +197,65 @@ async def test_w3_alerts_sent_in_a_row_while_running_reach_the_entity_before_it_
     with _a_gap_of_many_loop_turns():
         for event_type in W3_TYPES:
             async_dispatcher_send(hass, signal_alert(entry.entry_id), event_type, {})
-        assert seen == W3_TYPES[:1]  # the first is written at once, the other two wait for their gap
+        # the first is written at once, the other two wait for their gap
+        assert hass.states.get(EVENT).attributes.get("event_type") == W3_TYPES[0]
         assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     unsub()
     assert seen == W3_TYPES
+
+
+async def test_an_unload_during_the_start_does_not_record_an_alert_nobody_received(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer, hass_storage) -> None:
+    """An alert decided while Home Assistant starts is held in the entity's queue and only noted in the memory. When
+    the entry is unloaded then, and the start ends after the entity is removed and before the flush, the file must
+    not record the alert: the queue went with the entity."""
+    hass = tokyo
+    hass.set_state(CoreState.starting)
+    await _loaded(hass, aioclient_mock, entry, freezer)
+    key = f"jma.{entry.entry_id}.alert_memory"
+    memory = entry.runtime_data.memory
+    seen, unsub = _watch(hass)
+    memory.heat.append("20260101")  # decided during the start ...
+    memory.save()
+    async_dispatcher_send(hass, signal_alert(entry.entry_id), "heat_alert", {})  # ... and held in the queue
+    assert seen == []
+    real_unload_platforms = hass.config_entries.async_unload_platforms
+
+    async def unload_then_start(config_entry, platforms) -> bool:
+        unloaded = await real_unload_platforms(config_entry, platforms)
+        hass.set_state(CoreState.running)
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+        await asyncio.sleep(0)
+        return unloaded
+
+    with patch.object(hass.config_entries, "async_unload_platforms", side_effect=unload_then_start):
+        assert await hass.config_entries.async_unload(entry.entry_id)
+    await _after_the_delay(hass, freezer)
+    unsub()
+    assert seen == []  # nobody received it
+    assert key not in hass_storage or hass_storage[key]["data"]["heat"] == []
+
+
+async def test_a_freeze_before_the_start_writes_nothing_when_the_start_ends(
+        hass: HomeAssistant, freezer, hass_storage) -> None:
+    hass.set_state(CoreState.starting)
+    memory = AlertMemory(hass, "frozen_starting")
+    key = "jma.frozen_starting.alert_memory"
+    memory.async_listen_started()
+    memory.heat.append("20260101")
+    memory.save()  # noted for the start: nothing is written before Home Assistant runs
+    memory.freeze()
+    hass.set_state(CoreState.running)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STARTED)
+    await hass.async_block_till_done()
+    await memory.async_flush()
+    await _after_the_delay(hass, freezer)
+    assert key not in hass_storage
+
+    memory.unfreeze()  # the unload failed: the entry stays loaded and Home Assistant runs, so the data is written
+    await _after_the_delay(hass, freezer)
+    assert hass_storage[key]["data"]["heat"] == ["20260101"]
 
 
 async def test_a_failed_unload_unfreezes_the_memory(
@@ -232,6 +288,44 @@ async def test_an_alert_saved_before_the_unload_is_still_flushed(
     memory.save()  # the delayed write has not run
     assert key not in hass_storage or hass_storage[key]["data"]["heat"] == []
     assert await hass.config_entries.async_unload(entry.entry_id)
+    assert hass_storage[key]["data"]["heat"] == ["20260101"]
+
+
+async def test_the_unload_waits_for_a_write_that_is_under_way(
+        tokyo: HomeAssistant, aioclient_mock, entry, freezer, hass_storage) -> None:
+    """The delayed write has begun when the unload starts. The unload ends only after it, so that write cannot land
+    after the reloaded entry has read the file."""
+    hass = tokyo
+    await _loaded(hass, aioclient_mock, entry, freezer)
+    key = f"jma.{entry.entry_id}.alert_memory"
+    memory = entry.runtime_data.memory
+    memory.heat.append("20260101")
+    memory.save()
+    mocked_write = Store._async_write_data  # the stand-in of the hass_storage fixture
+    begun, go_on = asyncio.Event(), asyncio.Event()
+
+    async def slow_write(store, *args) -> None:
+        if store.key == key and not begun.is_set():  # the delayed write; the one of the flush comes after it
+            data = args[-1]
+            data["data"] = data.pop("data_func")()  # what the Store does first, then the file takes its time
+            begun.set()
+            await go_on.wait()
+        await mocked_write(store, *args)
+
+    with patch.object(Store, "_async_write_data", slow_write):
+        freezer.tick(timedelta(seconds=3))
+        async_fire_time_changed(hass, dt_util.utcnow())
+        for _ in range(100):
+            if begun.is_set():
+                break
+            await asyncio.sleep(0)
+        assert begun.is_set() and key not in hass_storage  # the write is under way
+        unload = hass.async_create_task(hass.config_entries.async_unload(entry.entry_id))
+        for _ in range(300):
+            await asyncio.sleep(0)
+        assert not unload.done()  # it waits for the write
+        go_on.set()
+        assert await unload
     assert hass_storage[key]["data"]["heat"] == ["20260101"]
 
 

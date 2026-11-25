@@ -19,8 +19,9 @@ removed entity writes no state), yet a tracker would still change its section. f
 data as it was handed over; from then on the flush and any pending delayed write use that copy, and save() writes
 nothing (not even a delayed write on this old Store that would land over the file of the reloaded entry). An alert
 decided after the freeze is announced again by the next start; one that still reached the entity in the instant
-before it was removed is then sent twice, which is again the right way round (a duplicate, never a loss). unfreeze()
-undoes it when the unload failed and the entry stays loaded.
+before it was removed is then sent twice, which is again the right way round (a duplicate, never a loss). An unload
+before Home Assistant has started writes nothing at all: the alerts noted during the start were still in the entity's
+queue. unfreeze() undoes the freeze when the unload failed and the entry stays loaded.
 """
 
 from __future__ import annotations
@@ -121,6 +122,7 @@ class AlertMemory:
         # state is RUNNING (async_at_started), so that is the state that counts here too.
         self._running = hass.state is CoreState.running
         self._unsaved = False
+        self._wrote = False  # a write was handed to the Store at least once: one may be under way
         self._frozen: MemoryData | None = None
 
     @property
@@ -169,8 +171,12 @@ class AlertMemory:
 
     @callback
     def freeze(self) -> None:
-        """Start of an unload: what is written from now on is a copy of the data as it is now (see the module doc)."""
+        """Start of an unload: what is written from now on is a copy of the data as it is now (see the module doc).
+        Before Home Assistant has started nothing was delivered, and the queue that holds it goes with the entity:
+        what was noted for the start is then not written at all, also when the start ends during the unload."""
         self._frozen = copy.deepcopy(self.data)
+        if not self._running:
+            self._unsaved = False
 
     @callback
     def unfreeze(self) -> None:
@@ -187,6 +193,7 @@ class AlertMemory:
             self._write()
 
     def _write(self) -> None:
+        self._wrote = True
         self._store.async_delay_save(self._data_to_save, SAVE_DELAY_S)
 
     def _data_to_save(self) -> MemoryData:
@@ -195,8 +202,10 @@ class AlertMemory:
 
     async def async_flush(self) -> None:
         """On unload: a reload inside the save delay must not forget an alert it just sent. Before
-        Home Assistant runs nothing was delivered, so nothing is written."""
-        if self._unsaved and self._running:
+        Home Assistant runs nothing was delivered, so nothing is written. Once this object has written, it writes
+        here again even with nothing unsaved: the Store does its writes one after the other, so this also waits for
+        a delayed write that is under way and could otherwise land after the reloaded entry has read the file."""
+        if self._running and (self._unsaved or self._wrote):
             self._unsaved = False
             await self._store.async_save(self._frozen if self._frozen is not None else self.data)
 

@@ -468,8 +468,9 @@ is installed. In the entity ids below, `<place>` is the lower-case English name 
 2. If the bulletin lists none, the volcano concerns you when it lies within the distance set under
    [Options](#options) of Home Assistant's home. The default is 50 km. This default is this integration's choice,
    not a JMA figure. The value 0 turns the distance rule off. A volcano with no coordinates in JMA's volcano list
-   cannot be placed and does not count, unless it already counted: it is then kept at the level of its bulletin,
-   without a distance, for as long as the list has no coordinates for it or until JMA no longer lists it.
+   cannot be placed and does not count. The exception is a volcano that already counted: while the distance rule is
+   on, it is kept at the level of its bulletin, without a distance, for as long as the list has no coordinates for
+   it or until JMA no longer lists it.
 
 **What the number is.** For the volcanoes that have JMA's 噴火警戒レベル (levels 1 to 5) the number is the level. Some
 volcanoes have no levels. JMA gives them a grade, and JMA publishes no scale for these. The sensor puts them on the
@@ -756,10 +757,10 @@ what to do. In the texts, `{title}` is the title of the entry, `{limit}` is 2 an
   judged by them alone, even when none of them can match a municipality (JMA's lists for 須美寿島 and
   ベヨネース列岩 hold one code, 1340000, that is not a municipality code). The distance rule needs the volcano's coordinates from JMA's volcano list.
   While they are not in hand (after a start of Home Assistant or a reload of the integration until the list has been
-  read once, or when the list has no coordinates for the volcano), a volcano the integration remembers from before
-  and whose bulletin names no municipality is kept at the level of its bulletin, with `distance_km` `null`. No
-  `volcano_lowered` event is sent for it, a level change in its bulletin is still announced, and the other volcanoes
-  are reported as usual. A volcano the integration does not remember and cannot place does not count until its
+  read once, or when the list has no coordinates for the volcano) and the distance option is above 0, a volcano the
+  integration remembers from before and whose bulletin names no municipality is kept at the level of its bulletin,
+  with `distance_km` `null`. It is not announced as lowered to 0, a level change in its bulletin is still announced,
+  and the other volcanoes are reported as usual. A volcano the integration does not remember and cannot place does not count until its
   coordinates are read. While there is no list, it is asked for again at every poll (every 5 minutes).
   For a volcano without levels, the 0 to 5 number is this integration's placement of JMA's grade, not
   a JMA figure (see [Volcanoes](#volcanoes)). The 50 km default distance is this integration's choice too.

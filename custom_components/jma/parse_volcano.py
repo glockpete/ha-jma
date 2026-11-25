@@ -276,11 +276,13 @@ class VolcanoTracker:
             return "drop"
         return None
 
-    def remembered_info(self, code: str) -> VolcanoInfo:
-        """The remembered names of a held volcano that the volcano list has no row for (no coordinates), so that a
-        hold does not overwrite them with None."""
+    def remembered_info(self, code: str, info: VolcanoInfo | None = None) -> VolcanoInfo:
+        """The names of a held volcano: those of its row in the volcano list where the row has them, else the
+        remembered ones, so that a hold does not overwrite a name with None. No coordinates: a held volcano has none
+        in hand."""
         old = self._entry(code)
-        return VolcanoInfo(code, _str(old.get("name_ja")), _str(old.get("name_en")), None, None)
+        return VolcanoInfo(code, (info.name_ja if info else None) or _str(old.get("name_ja")),
+                           (info.name_en if info else None) or _str(old.get("name_en")), None, None)
 
     def update(self, volcanoes: list[dict[str, Any]], dropped: Iterable[str] = ()) -> list[tuple[str, dict[str, Any]]]:
         """`volcanoes`: the entries of volcano_entry() that concern the place, all of them, a held one included (why
@@ -296,7 +298,10 @@ class VolcanoTracker:
             old = self._entry(code)
             level = volcano.get("level")
             if not isinstance(level, int):
-                continue  # a kind code that is not known: left as it was
+                # a kind code that is not known: left as it was, but it is listed, so "in a row" starts again
+                if _count(old.get("absent")):
+                    self._put(code, {**old, "absent": 0})
+                continue
             remembered, reported = _when(old.get("report_time")), _when(volcano.get("report_time"))
             if remembered is not None and reported is not None and reported < remembered:
                 self._put(code, {**old, "absent": 0})  # an older file than the one already seen

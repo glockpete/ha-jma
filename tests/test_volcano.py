@@ -448,6 +448,19 @@ def test_a_kind_this_release_does_not_know_leaves_the_memory_as_it_was() -> None
     assert tracker.update([_volcano(level=None, kind_code="99")]) == [] and memory["503"] == before
 
 
+def test_a_poll_that_lists_the_volcano_with_an_unknown_kind_ends_the_row_of_polls_without_it() -> None:
+    """Missing, listed with a kind this release does not know, missing again: that is not two polls in a row."""
+    memory: dict[str, Any] = {}
+    tracker = VolcanoTracker(memory)
+    tracker.update([_volcano(level=3)])
+    assert tracker.update([]) == [] and memory["503"]["absent"] == 1
+    tracker.dirty = False
+    assert tracker.update([_volcano(level=None, kind_code="99")]) == []
+    assert memory["503"]["absent"] == 0 and memory["503"]["level"] == 3 and tracker.dirty
+    assert tracker.update([]) == [] and memory["503"]["absent"] == 1  # the first poll without it, again
+    assert _kinds(tracker.update([])) == [("volcano_lowered", "503", 3, 0)]
+
+
 def test_a_restart_with_the_memory_sends_only_what_changed_meanwhile() -> None:
     memory: dict[str, Any] = {}
     VolcanoTracker(memory).update([_volcano(level=3), _volcano("113", 2)])
@@ -516,6 +529,9 @@ def test_a_held_volcano_keeps_the_relevance_and_the_names_remembered() -> None:
     assert tracker.update([_volcano()]) == [] and memory["503"]["relevance"] == "municipality"  # placed again
     assert tracker.remembered_info("503") == VolcanoInfo("503", "阿蘇山", "Asosan", None, None)
     assert VolcanoTracker({"700": 5}).remembered_info("700") == VolcanoInfo("700", None, None, None, None)
+    # a row of the list gives the names it has (and never its coordinates), the memory the ones it lacks
+    listed = VolcanoInfo("503", None, "Aso", 32.884, None)
+    assert tracker.remembered_info("503", listed) == VolcanoInfo("503", "阿蘇山", "Aso", None, None)
 
 
 def test_a_dropped_volcano_is_forgotten_at_once_without_an_event() -> None:
@@ -1141,6 +1157,14 @@ async def test_the_remembered_names_survive_a_hold(tokyo: HomeAssistant, aioclie
     row["name_en"] = "Hakone"
     _serve_hakone(aioclient_mock, rows=rows)
     freezer.tick(INTERVAL_VOLCANO)
+    await co.async_refresh()
+    assert [(v["code"], v["name_en"], v["distance_km"]) for v in co.data.volcanoes] == [("315", "Hakone", None)]
+    assert memory["315"] == _hakone(name_en="Hakone")
+
+    # a row with neither coordinates nor an English name: the remembered name stays
+    del row["name_en"]
+    _serve_hakone(aioclient_mock, rows=rows)
+    freezer.tick(INTERVAL_VOLCANO_LIST)  # the list is asked for again
     await co.async_refresh()
     assert [(v["code"], v["name_en"], v["distance_km"]) for v in co.data.volcanoes] == [("315", "Hakone", None)]
     assert memory["315"] == _hakone(name_en="Hakone")

@@ -10,13 +10,17 @@ and the project uses [semantic versioning](https://semver.org/).
 - **Volcano: a restart no longer sends a false `volcano_lowered`.** While JMA's volcano list could not be read (after
   a start of Home Assistant or a reload), or had no coordinates for a volcano, a remembered volcano whose bulletin
   names no municipality was counted as gone. It left the sensor, and after two polls a false `volcano_lowered` was
-  sent, then a `volcano_raised` when the list came back. Now the volcano is kept at its bulletin's level, without a
-  distance, until it can be placed. A level change in that time is still announced, and the other volcanoes are
-  reported as usual. The list is asked for again at every poll while there is none, and an answer without a row no
-  longer replaces a list already read.
+  sent, then a `volcano_raised` when the list came back. Now, while the distance option is above 0, the volcano is
+  kept at its bulletin's level, without a distance, until it can be placed. A level change in that time is still
+  announced, and the other volcanoes are reported as usual. The list is asked for again at every poll while there is
+  none, and an answer without a row no longer replaces a list already read.
 - **Volcano: a smaller distance option no longer sends `volcano_lowered`.** A volcano that counted by distance and
   lies outside the distance after the option or Home Assistant's home was changed is forgotten without an event.
-  Before, it was announced as lowered to 0 after two polls although its level had not changed.
+  Before, it was announced as lowered to 0 after two polls although its level had not changed. A volcano remembered
+  by release 0.8.0 is treated this way once a poll after the upgrade has placed it.
+- **Volcano: "two polls in a row" is counted exactly.** A poll that listed the volcano with a kind code this release
+  does not know did not start the count again, so a `volcano_lowered` could follow two polls without the volcano
+  that were not in a row.
 - **Events: two alerts sent in a row no longer share one state.** While Home Assistant was running, alerts decided at
   the same moment were written in the same millisecond. The state of the event entity is its fire time to the
   millisecond, so it did not change for the second alert, and a state trigger that names `to`, `from`, `not_to` or
@@ -26,7 +30,9 @@ and the project uses [semantic versioning](https://semver.org/).
   unloaded could be recorded as announced although the event entity was already gone, so it was never sent. A late
   write of the old alert memory could also land over the file of the reloaded entry two seconds later. Alerts still
   waiting in the event entity are now sent before it is removed, and nothing decided after that is recorded. Such an
-  alert is sent after the reload, and one decided in the instant the entity is being removed can be sent twice.
+  alert is sent after the reload, and one decided in the instant the entity is being removed can be sent twice. A
+  reload while Home Assistant is still starting records nothing: the alerts found during the start were still
+  waiting, and the reloaded entry sends them.
 - **Warnings: a record with a null `dataTypeCode`.** Such a record made the next poll raise a `TypeError` and left the
   warnings feed failing until a restart. The file is now refused like any other changed file.
 - **Typhoon: a list nested thousands of levels deep.** A broken body of that kind made the typhoon sensor unavailable
